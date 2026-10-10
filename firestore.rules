@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny all unspecified paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'kwemoielijah49@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) && isValidId(userId)
+        && incoming().uid == request.auth.uid
+        && incoming().keys().hasAll(['uid', 'email', 'role'])
+        && incoming().role in ['customer', 'photographer'];
+      allow update: if (isOwner(userId) || isAdmin())
+        && incoming().uid == existing().uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
+      allow delete: if isAdmin();
+    }
+
+    // Events Collection: Public read for published events
+    match /events/{eventId} {
+      allow read: if resource.data.status == 'published' || (isSignedIn() && resource.data.photographerId == request.auth.uid) || isAdmin();
+      allow create: if isSignedIn() && isValidId(eventId)
+        && incoming().photographerId == request.auth.uid
+        && incoming().keys().hasAll(['id', 'photographerId', 'title', 'eventDate', 'status']);
+      allow update: if isSignedIn()
+        && (existing().photographerId == request.auth.uid || isAdmin())
+        && incoming().photographerId == existing().photographerId;
+      allow delete: if isSignedIn() && (existing().photographerId == request.auth.uid || isAdmin());
+    }
+
+    // Orders Collection
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && (resource.data.photographerId == request.auth.uid || resource.data.customerEmail == request.auth.token.email || isAdmin());
+      allow list: if isSignedIn() && (resource.data.photographerId == request.auth.uid || isAdmin());
+      allow create: if true; // Public checkout allows initial pending order creation
+      allow update: if (isSignedIn() && (existing().photographerId == request.auth.uid || isAdmin()))
+        || (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'mpesaReference', 'paidAt', 'downloadToken']));
+      allow delete: if isAdmin();
+    }
+
+    // Connection testing endpoint for health check
+    match /test/connection {
+      allow read, write: if true;
+    }
+  }
+}

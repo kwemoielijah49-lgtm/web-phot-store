@@ -1,0 +1,8 @@
+<svg viewBox="0 0 240 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(6, 6)">
+    <circle cx="42" cy="42" r="42" fill="#252723" />
+    <path d="M22 17H36.5L43.8 48.5L51.2 17H65.5L52 67H35.8L22 17Z" fill="#FFFFFF" />
+  </g>
+  <text x="96" y="56" fill="#252723" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="49" letter-spacing="-0.035em">ault</text>
+  <text x="98" y="76" fill="#696B65" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="15" letter-spacing="0.04em">photography</text>
+</svg>

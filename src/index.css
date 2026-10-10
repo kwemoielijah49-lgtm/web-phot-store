@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-paper: #F4F0E7;
+    --color-paper-light: #FAF8F5;
+    --color-paper-warm: #EFE9DC;
+    --color-ink: #252723;
+    --color-forest: #35594B;
+    --color-forest-hover: #29473B;
+    --color-forest-light: #EBF1EE;
+    --color-clay: #B66D4D;
+    --color-clay-hover: #9E5B3D;
+    --color-clay-light: #F7EFEA;
+    --color-stone: #DCD8CE;
+    --color-stone-light: #EAE6DC;
+    --color-white: #FFFFFF;
+    --color-muted: #696B65;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  /* Editorial Serif Display Headlines */
+  .font-serif {
+    font-family: 'DM Serif Display', Georgia, Cambria, 'Times New Roman', serif;
+  }
+
+  .font-sans {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  /* Smooth numeric tabular display */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom subtle scrollbars for dense galleries & tables */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(53, 89, 75, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(53, 89, 75, 0.45);
+}
+

@@ -1,0 +1,357 @@
+import { Photographer, Event, Photo, Order, PlatformSettings } from '../types';
+import { createSyntheticPhotoCanvas, generateWatermarkedPreview, generateThumbnail } from './imageProcessor';
+
+export const INITIAL_PLATFORM_SETTINGS: PlatformSettings = {
+  defaultCommissionRate: 0.10, // 10%
+  suggestedPriceKes: 250,
+  eventRetentionDays: 90,
+  downloadExpiryDays: 30,
+  payoutSchedule: 'weekly',
+  emergencySupportPhone: '+254 700 123 456',
+};
+
+export const INITIAL_PHOTOGRAPHERS: Photographer[] = [
+  {
+    id: 'photo_mwangi_01',
+    name: 'David Mwangi',
+    businessName: 'Mwangi Creative Media',
+    email: 'david@mwangimedia.co.ke',
+    phone: '+254 722 458 912',
+    bio: 'Lead documentary & academic event photographer in Nairobi. Official coverage for university graduations and corporate galas across East Africa.',
+    brandColor: '#d97706',
+    mpesaTillOrPaybill: '522123',
+    mpesaPhone: '254722458912',
+    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+    status: 'active',
+    joinedDate: '2025-01-15',
+    defaultPriceKes: 250,
+    totalPayoutsKes: 84500,
+  },
+  {
+    id: 'photo_amina_02',
+    name: 'Amina Wanjiku',
+    businessName: 'Luxe Flora & Weddings',
+    email: 'amina@luxeweddings.ke',
+    phone: '+254 711 889 001',
+    bio: 'Editorial wedding and engagement storytelling. Natural light, spontaneous candid joy, and timeless portraits at premier venues in Karen and Naivasha.',
+    brandColor: '#db2777',
+    mpesaTillOrPaybill: '689012',
+    mpesaPhone: '254711889001',
+    avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=200&q=80',
+    status: 'active',
+    joinedDate: '2025-03-20',
+    defaultPriceKes: 350,
+    totalPayoutsKes: 142000,
+  },
+  {
+    id: 'photo_kip_03',
+    name: 'Josphat Kiprono',
+    businessName: 'Rift Valley Sports & Media',
+    email: 'josphat@riftvalleysports.co.ke',
+    phone: '+254 705 334 221',
+    bio: 'High-speed sports and marathon documentary. Nyayo Stadium, Eldoret athletics meets, and city marathons.',
+    brandColor: '#16a34a',
+    mpesaTillOrPaybill: '809112',
+    mpesaPhone: '254705334221',
+    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
+    status: 'active',
+    joinedDate: '2025-06-10',
+    defaultPriceKes: 200,
+    totalPayoutsKes: 51200,
+  },
+];
+
+export const HIGH_RES_PRESET_COVERS = [
+  {
+    name: 'Graduation Ceremony',
+    theme: 'Graduation',
+    url: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1600&q=85',
+  },
+  {
+    name: 'Garden Wedding & Sunset Vows',
+    theme: 'Wedding',
+    url: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1600&q=85',
+  },
+  {
+    name: 'City Marathon & Athletics',
+    theme: 'Sports',
+    url: 'https://images.unsplash.com/photo-1452626038306-9aae5e071dd3?auto=format&fit=crop&w=1600&q=85',
+  },
+  {
+    name: 'Corporate & Tech Summit',
+    theme: 'Corporate',
+    url: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?auto=format&fit=crop&w=1600&q=85',
+  },
+  {
+    name: 'Cultural Festival & Gathering',
+    theme: 'Culture',
+    url: 'https://images.unsplash.com/photo-1516426122078-c23e76319801?auto=format&fit=crop&w=1600&q=85',
+  },
+];
+
+export const INITIAL_EVENTS: Event[] = [
+  {
+    id: 'event_uon_grad_71',
+    photographerId: 'photo_mwangi_01',
+    title: 'University of Nairobi 71st Graduation Ceremony',
+    slug: 'uon-71st-graduation-2026',
+    description: 'Full official photo coverage for the Faculty of Science, Business, and Engineering. Over 1,200 moments captured across the Chancellor procession, stage walks, and family celebrations.',
+    location: 'Main Campus Great Court, Nairobi',
+    eventDate: '2026-09-25',
+    publishedDate: '2026-09-26',
+    coverImageUrl: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1600&q=85',
+    status: 'published',
+    retentionDeadline: '2026-12-24', // 90 days
+    sessions: ['Chancellor Procession', 'Stage Crossing & Conferment', 'Family & Garden Portraits', 'Faculty Honors'],
+    categories: ['Stage Walk', 'Gown Portrait', 'Family Celebrate', 'Faculty VIP'],
+    suggestedPriceKes: 250,
+    overridePriceKes: 250,
+    bundleOffers: [
+      { minPhotos: 3, discountPercent: 10, title: 'Triple Pack (10% off)' },
+      { minPhotos: 5, discountPercent: 20, bundlePriceKes: 1000, title: 'Graduation Commemorative 5-Pack (Save KES 250)' },
+    ],
+    totalPhotosCount: 8,
+  },
+  {
+    id: 'event_wedding_windsor',
+    photographerId: 'photo_amina_02',
+    title: 'The Garden Wedding of Kevin & Wambui',
+    slug: 'kevin-wambui-wedding-windsor',
+    description: 'An intimate sunset garden wedding celebration featuring scenic lawn vows, bridal party laughs, and lively evening reception at Windsor Golf & Country Club.',
+    location: 'Windsor Golf & Country Club, Ridgeways, Nairobi',
+    eventDate: '2026-10-02',
+    publishedDate: '2026-10-03',
+    coverImageUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1600&q=85',
+    status: 'published',
+    retentionDeadline: '2026-12-31',
+    sessions: ['Bridal Morning', 'Church Vows', 'Garden Sunset Walk', 'Reception & Dance'],
+    categories: ['Bride & Groom', 'Bridal Party', 'Guest Candids', 'Speeches & Cake'],
+    suggestedPriceKes: 300,
+    overridePriceKes: 350,
+    bundleOffers: [
+      { minPhotos: 5, discountPercent: 15, bundlePriceKes: 1500, title: 'Guest Keepsake Bundle (5 photos)' },
+      { minPhotos: 10, discountPercent: 25, bundlePriceKes: 2600, title: 'Full Family Album (10 photos)' },
+    ],
+    totalPhotosCount: 6,
+  },
+  {
+    id: 'event_nairobi_marathon',
+    photographerId: 'photo_kip_03',
+    title: 'Nairobi City Marathon 2026 - Expressway & Stadium',
+    slug: 'nairobi-marathon-2026',
+    description: 'Capture your personal milestone crossing the finish line! Search using your bib number or photo code along the Expressway and Nyayo Stadium finish chute.',
+    location: 'Nyayo National Stadium & Nairobi Expressway',
+    eventDate: '2026-10-05',
+    publishedDate: '2026-10-06',
+    coverImageUrl: 'https://images.unsplash.com/photo-1452626038306-9aae5e071dd3?auto=format&fit=crop&w=1600&q=85',
+    status: 'published',
+    retentionDeadline: '2027-01-03',
+    sessions: ['Elite 42km Start', 'Half Marathon Mid-Route', 'Expressway 30KM Mark', 'Finish Line Chute'],
+    categories: ['Finish Line', 'Running Action', 'Medal Portrait', 'Crowd & Team'],
+    suggestedPriceKes: 200,
+    overridePriceKes: 200,
+    bundleOffers: [
+      { minPhotos: 3, discountPercent: 15, bundlePriceKes: 500, title: 'Finisher Trio Pack' },
+    ],
+    totalPhotosCount: 6,
+  },
+];
+
+/**
+ * Generates initial photos with synchronous canvas data URLs
+ */
+export function buildInitialPhotos(): Photo[] {
+  const photos: Photo[] = [];
+
+  // Event 1: UoN Graduation
+  const uonItems = [
+    { code: 'UON-001', title: 'Chancellor Hooding Ceremony', session: 'Stage Crossing & Conferment', cat: 'Stage Walk', price: 250 },
+    { code: 'UON-002', title: 'Degree Conferment Stage Walk', session: 'Stage Crossing & Conferment', cat: 'Stage Walk', price: 250 },
+    { code: 'UON-003', title: 'Classic Gown & Scroll Portrait', session: 'Family & Garden Portraits', cat: 'Gown Portrait', price: 250 },
+    { code: 'UON-004', title: 'Mortarboard Cap Toss in Great Court', session: 'Family & Garden Portraits', cat: 'Family Celebrate', price: 250 },
+    { code: 'UON-005', title: 'Proud Parents Hug by Fountain', session: 'Family & Garden Portraits', cat: 'Family Celebrate', price: 250 },
+    { code: 'UON-006', title: 'Engineering Honors Distinction Walk', session: 'Stage Crossing & Conferment', cat: 'Stage Walk', price: 250 },
+    { code: 'UON-007', title: 'Faculty Deans Academic Procession', session: 'Chancellor Procession', cat: 'Faculty VIP', price: 250 },
+    { code: 'UON-008', title: 'Graduation Squad High Five', session: 'Family & Garden Portraits', cat: 'Family Celebrate', price: 250 },
+  ];
+
+  uonItems.forEach((item, idx) => {
+    const synthetic = createSyntheticPhotoCanvas('graduation', idx, `${item.code} · ${item.title}`);
+    photos.push({
+      id: `photo_uon_${idx + 1}`,
+      eventId: 'event_uon_grad_71',
+      photographerId: 'photo_mwangi_01',
+      code: item.code,
+      filename: `UON_GRAD_71_${item.code}.jpg`,
+      originalUrl: synthetic.originalUrl,
+      previewWatermarkedUrl: synthetic.originalUrl, // Will be overlaid or watermarked
+      thumbnailUrl: synthetic.originalUrl,
+      captureTimestamp: '2026-09-25T10:14:00Z',
+      session: item.session,
+      category: item.cat,
+      priceKes: item.price,
+      status: 'published',
+      viewCount: 42 + idx * 7,
+      purchaseCount: 3 + idx,
+      fileSizeBytes: 8400000 + idx * 250000,
+      width: synthetic.width,
+      height: synthetic.height,
+      lensInfo: 'Sony FE 70-200mm f/2.8 GM OSS II',
+      cameraModel: 'Sony A7R V',
+    });
+  });
+
+  // Event 2: Wedding
+  const wedItems = [
+    { code: 'WED-101', title: 'First Look in Windsor Gardens', session: 'Garden Sunset Walk', cat: 'Bride & Groom', price: 350 },
+    { code: 'WED-102', title: 'Vows & Ring Exchange at Gazebo', session: 'Church Vows', cat: 'Bride & Groom', price: 350 },
+    { code: 'WED-103', title: 'Bridal Party Toast & Confetti', session: 'Garden Sunset Walk', cat: 'Bridal Party', price: 350 },
+    { code: 'WED-104', title: 'Traditional Mugithi Dance Entrance', session: 'Reception & Dance', cat: 'Guest Candids', price: 350 },
+    { code: 'WED-105', title: 'Golden Hour Silhouette by Fairway', session: 'Garden Sunset Walk', cat: 'Bride & Groom', price: 350 },
+    { code: 'WED-106', title: 'Tiered Vanilla Cake Cutting Celebration', session: 'Reception & Dance', cat: 'Speeches & Cake', price: 350 },
+  ];
+
+  wedItems.forEach((item, idx) => {
+    const synthetic = createSyntheticPhotoCanvas('wedding', idx, `${item.code} · ${item.title}`);
+    photos.push({
+      id: `photo_wed_${idx + 1}`,
+      eventId: 'event_wedding_windsor',
+      photographerId: 'photo_amina_02',
+      code: item.code,
+      filename: `WED_WINDSOR_${item.code}.jpg`,
+      originalUrl: synthetic.originalUrl,
+      previewWatermarkedUrl: synthetic.originalUrl,
+      thumbnailUrl: synthetic.originalUrl,
+      captureTimestamp: '2026-10-02T15:30:00Z',
+      session: item.session,
+      category: item.cat,
+      priceKes: item.price,
+      status: 'published',
+      viewCount: 35 + idx * 5,
+      purchaseCount: 2 + idx,
+      fileSizeBytes: 9100000 + idx * 300000,
+      width: synthetic.width,
+      height: synthetic.height,
+      lensInfo: 'Canon RF 50mm f/1.2L USM',
+      cameraModel: 'Canon EOS R5',
+    });
+  });
+
+  // Event 3: Marathon
+  const marItems = [
+    { code: 'MAR-201', title: 'Expressway Flyover Sunrise Lead Pack', session: 'Expressway 30KM Mark', cat: 'Running Action', price: 200 },
+    { code: 'MAR-202', title: 'Nyayo Stadium Track Finish Sprint', session: 'Finish Line Chute', cat: 'Finish Line', price: 200 },
+    { code: 'MAR-203', title: 'Finisher Medals Display & Joy', session: 'Finish Line Chute', cat: 'Medal Portrait', price: 200 },
+    { code: 'MAR-204', title: 'Hydration Station High Spurt', session: 'Half Marathon Mid-Route', cat: 'Running Action', price: 200 },
+    { code: 'MAR-205', title: 'Charity Runners Celebration', session: 'Finish Line Chute', cat: 'Crowd & Team', price: 200 },
+    { code: 'MAR-206', title: 'Expressway Panoramic Peloton', session: 'Expressway 30KM Mark', cat: 'Running Action', price: 200 },
+  ];
+
+  marItems.forEach((item, idx) => {
+    const synthetic = createSyntheticPhotoCanvas('sports', idx, `${item.code} · ${item.title}`);
+    photos.push({
+      id: `photo_mar_${idx + 1}`,
+      eventId: 'event_nairobi_marathon',
+      photographerId: 'photo_kip_03',
+      code: item.code,
+      filename: `MARATHON_2026_${item.code}.jpg`,
+      originalUrl: synthetic.originalUrl,
+      previewWatermarkedUrl: synthetic.originalUrl,
+      thumbnailUrl: synthetic.originalUrl,
+      captureTimestamp: '2026-10-05T08:15:00Z',
+      session: item.session,
+      category: item.cat,
+      priceKes: item.price,
+      status: 'published',
+      viewCount: 60 + idx * 10,
+      purchaseCount: 5 + idx,
+      fileSizeBytes: 7900000 + idx * 200000,
+      width: synthetic.width,
+      height: synthetic.height,
+      lensInfo: 'Nikon NIKKOR Z 70-200mm f/2.8 VR S',
+      cameraModel: 'Nikon Z9',
+    });
+  });
+
+  return photos;
+}
+
+export const INITIAL_ORDERS: Order[] = [
+  {
+    id: 'ord_uon_0981',
+    orderNumber: 'ORD-2026-1042',
+    customerPhone: '254712345678',
+    customerEmail: 'wambui.kariuki@gmail.com',
+    customerName: 'Wambui Kariuki',
+    photographerId: 'photo_mwangi_01',
+    photographerBusinessName: 'Mwangi Creative Media',
+    eventId: 'event_uon_grad_71',
+    eventTitle: 'University of Nairobi 71st Graduation Ceremony',
+    items: [
+      {
+        photoId: 'photo_uon_1',
+        photoCode: 'UON-001',
+        photoTitle: 'Chancellor Hooding Ceremony',
+        thumbnailUrl: '',
+        priceKes: 250,
+        eventId: 'event_uon_grad_71',
+        eventTitle: 'University of Nairobi 71st Graduation Ceremony',
+      },
+      {
+        photoId: 'photo_uon_3',
+        photoCode: 'UON-003',
+        photoTitle: 'Classic Gown & Scroll Portrait',
+        thumbnailUrl: '',
+        priceKes: 250,
+        eventId: 'event_uon_grad_71',
+        eventTitle: 'University of Nairobi 71st Graduation Ceremony',
+      },
+    ],
+    subtotalKes: 500,
+    discountKes: 0,
+    totalKes: 500,
+    platformCommissionRate: 0.10,
+    commissionAmountKes: 50,
+    photographerEarningsKes: 450,
+    status: 'paid',
+    createdAt: '2026-09-27T11:20:00Z',
+    paidAt: '2026-09-27T11:21:45Z',
+    mpesaReference: 'QKD8291KL0',
+    downloadToken: 'dl_token_88921a9',
+    downloadExpiresAt: '2026-10-27T11:21:45Z',
+  },
+  {
+    id: 'ord_wed_0442',
+    orderNumber: 'ORD-2026-1043',
+    customerPhone: '254722998877',
+    customerEmail: 'brian.omondi@outlook.com',
+    customerName: 'Brian Omondi',
+    photographerId: 'photo_amina_02',
+    photographerBusinessName: 'Luxe Flora & Weddings',
+    eventId: 'event_wedding_windsor',
+    eventTitle: 'The Garden Wedding of Kevin & Wambui',
+    items: [
+      {
+        photoId: 'photo_wed_1',
+        photoCode: 'WED-101',
+        photoTitle: 'First Look in Windsor Gardens',
+        thumbnailUrl: '',
+        priceKes: 350,
+        eventId: 'event_wedding_windsor',
+        eventTitle: 'The Garden Wedding of Kevin & Wambui',
+      },
+    ],
+    subtotalKes: 350,
+    discountKes: 0,
+    totalKes: 350,
+    platformCommissionRate: 0.10,
+    commissionAmountKes: 35,
+    photographerEarningsKes: 315,
+    status: 'paid',
+    createdAt: '2026-10-04T09:12:00Z',
+    paidAt: '2026-10-04T09:13:10Z',
+    mpesaReference: 'RTY4910NM2',
+    downloadToken: 'dl_token_3372bbf',
+    downloadExpiresAt: '2026-11-03T09:13:10Z',
+  },
+];
