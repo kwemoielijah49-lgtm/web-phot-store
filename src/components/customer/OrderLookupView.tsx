@@ -27,6 +27,8 @@ export const OrderLookupView: React.FC<OrderLookupViewProps> = ({ onOpenRefundMo
     latestPaidOrder,
     firebaseUser,
     platformSettings,
+    openDownloadAllModal,
+    customerOrderIds,
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,7 +39,7 @@ export const OrderLookupView: React.FC<OrderLookupViewProps> = ({ onOpenRefundMo
   // Authorized customer-specific orders:
   // 1. If user searched by phone/code/email, show exact matches
   // 2. Otherwise, if signed in, show user's authenticated orders
-  // 3. Or if latestPaidOrder exists in this session, show it
+  // 3. Or if customer has purchases in customerOrderIds or latestPaidOrder, show them
   // 4. Do NOT dump public database transactions
   const displayedOrders = useMemo(() => {
     if (searchQuery.trim()) {
@@ -52,11 +54,18 @@ export const OrderLookupView: React.FC<OrderLookupViewProps> = ({ onOpenRefundMo
     }
 
     if (latestPaidOrder) {
+      const matched = orders.filter((o) => o.id === latestPaidOrder.id || (customerOrderIds && customerOrderIds.includes(o.id)));
+      if (matched.length > 0) return matched;
       return [latestPaidOrder];
     }
 
+    if (customerOrderIds && customerOrderIds.length > 0) {
+      const matched = orders.filter((o) => customerOrderIds.includes(o.id));
+      if (matched.length > 0) return matched;
+    }
+
     return [];
-  }, [searchQuery, lookupOrdersByPhoneOrCode, firebaseUser, orders, latestPaidOrder]);
+  }, [searchQuery, lookupOrdersByPhoneOrCode, firebaseUser, orders, latestPaidOrder, customerOrderIds]);
 
   const handleDownload = (order: Order, item: OrderItem) => {
     setDownloadError(null);
@@ -238,16 +247,27 @@ export const OrderLookupView: React.FC<OrderLookupViewProps> = ({ onOpenRefundMo
 
                   {/* Purchased Photos Gallery Grid */}
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between text-xs text-[#696B65]">
-                      <span>{order.items.length} High-Resolution Master {order.items.length === 1 ? 'Photo' : 'Photos'}</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[#696B65] pb-1">
+                      <span className="font-medium text-[#252723]">
+                        {order.items.length} High-Resolution Master {order.items.length === 1 ? 'Photo' : 'Photos'}
+                      </span>
                       {order.status === 'paid' && !isExpired && (
-                        <button
-                          onClick={() => handleDownloadAll(order)}
-                          className="text-[#35594B] hover:underline font-semibold flex items-center gap-1.5"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Download All Masters</span>
-                        </button>
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            onClick={() => openDownloadAllModal({ order })}
+                            className="px-4 py-2 bg-[#35594B] hover:bg-[#29473B] text-white rounded-xl font-semibold flex items-center gap-2 text-xs shadow-sm transition-all cursor-pointer hover:shadow"
+                          >
+                            <Download className="w-4 h-4" />
+                            <span>Download All ({order.items.length} Photos · ZIP)</span>
+                          </button>
+                          <button
+                            onClick={() => handleDownloadAll(order)}
+                            className="text-[#696B65] hover:text-[#252723] text-xs underline cursor-pointer px-1 py-1"
+                            title="Download each file separately as loose JPGs"
+                          >
+                            Save Separately
+                          </button>
+                        </div>
                       )}
                     </div>
 

@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Photo, Event } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { formatKES } from '../../utils/mpesa';
-import { X, Plus, Check, ShieldCheck, Flag } from 'lucide-react';
+import { X, Plus, Check, ShieldCheck, Flag, Download, CheckCircle2, Loader2 } from 'lucide-react';
+import { triggerSingleDownload } from '../../utils/downloadHelper';
 
 interface PhotoLightboxProps {
   photo: Photo;
@@ -15,11 +16,27 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
   onClose,
   onOpenReportModal,
 }) => {
-  const { events, photographers, addToCart, removeFromCart, isInCart, setIsCartOpen, setActivePaymentModal } = useApp();
+  const {
+    events,
+    photographers,
+    addToCart,
+    removeFromCart,
+    isInCart,
+    setIsCartOpen,
+    setActivePaymentModal,
+    isPhotoPurchased,
+    verifyAndDownloadOriginal,
+    openDownloadAllModal,
+    getPurchasedPhotosForEvent,
+  } = useApp();
 
   const event = events.find((e) => e.id === photo.eventId);
   const photographer = photographers.find((p) => p.id === photo.photographerId);
   const inCart = isInCart(photo.id);
+  const { isPurchased, order } = isPhotoPurchased(photo.id);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const eventPurchasedItems = event ? getPurchasedPhotosForEvent(event.id) : [];
 
   // Close on Escape key
   useEffect(() => {
@@ -29,6 +46,20 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  const handleDownloadMaster = async () => {
+    if (!order) return;
+    setIsDownloading(true);
+    try {
+      const verification = verifyAndDownloadOriginal(order.id, photo.id);
+      const urlToUse = verification.allowed && verification.originalUrl ? verification.originalUrl : photo.originalUrl;
+      await triggerSingleDownload(urlToUse, `${photo.code}_ORIGINAL_24MP.jpg`);
+    } catch (err) {
+      console.error('Download error:', err);
+    } finally {
+      setTimeout(() => setIsDownloading(false), 800);
+    }
+  };
 
   const handleInstantBuy = () => {
     if (event) {
@@ -93,18 +124,34 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
               </h2>
             </div>
 
-            {/* Price Box */}
-            <div className="bg-[#FAF8F5] border border-[#DCD8CE] p-4 rounded-xl flex items-baseline justify-between">
-              <div>
-                <p className="text-xs text-[#696B65]">Digital Original (KES)</p>
-                <p className="text-2xl font-bold font-mono tabular-nums text-[#252723] mt-0.5">
-                  {formatKES(photo.priceKes)}
-                </p>
+            {/* Price Box or Purchased State */}
+            {isPurchased ? (
+              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-800 font-bold block">
+                    Verified Purchase
+                  </span>
+                  <p className="text-sm font-bold text-emerald-950 mt-0.5">
+                    Unwatermarked Master Unlocked
+                  </p>
+                </div>
+                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
               </div>
-              <div className="text-right text-[11px] text-[#35594B] font-medium">
-                <span>Instant M-Pesa Unlocking</span>
+            ) : (
+              <div className="bg-[#FAF8F5] border border-[#DCD8CE] p-4 rounded-xl flex items-baseline justify-between">
+                <div>
+                  <p className="text-xs text-[#696B65]">Digital Original (KES)</p>
+                  <p className="text-2xl font-bold font-mono tabular-nums text-[#252723] mt-0.5">
+                    {formatKES(photo.priceKes)}
+                  </p>
+                </div>
+                <div className="text-right text-[11px] text-[#35594B] font-medium">
+                  <span>Instant M-Pesa Unlocking</span>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Photo Metadata */}
             <div className="space-y-2 text-xs border-y border-[#DCD8CE] py-3 text-[#696B65]">
@@ -142,33 +189,73 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
 
           {/* Action CTAs */}
           <div className="space-y-2 pt-2">
-            <button
-              onClick={handleInstantBuy}
-              className="w-full py-3 bg-[#35594B] hover:bg-[#29473B] text-white font-semibold text-sm rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
-            >
-              <span>Instant Buy with M-Pesa</span>
-            </button>
+            {isPurchased ? (
+              <>
+                <button
+                  onClick={handleDownloadMaster}
+                  disabled={isDownloading}
+                  className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-sm rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isDownloading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Downloading Master File...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      <span>Download Master Photo (24MP JPG)</span>
+                    </>
+                  )}
+                </button>
 
-            <button
-              onClick={handleToggleCart}
-              className={`w-full py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 ${
-                inCart
-                  ? 'bg-[#B66D4D] text-white'
-                  : 'bg-[#FAF8F5] hover:bg-[#F4F0E7] text-[#252723] border border-[#DCD8CE]'
-              }`}
-            >
-              {inCart ? (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Item In Cart (Remove)</span>
-                </>
-              ) : (
-                <>
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add to Cart ({formatKES(photo.priceKes)})</span>
-                </>
-              )}
-            </button>
+                {eventPurchasedItems.length > 1 && (
+                  <button
+                    onClick={() => {
+                      onClose();
+                      openDownloadAllModal({
+                        customItems: eventPurchasedItems,
+                        eventTitle: event?.title,
+                      });
+                    }}
+                    className="w-full py-2.5 bg-[#FAF8F5] hover:bg-[#F4F0E7] text-[#35594B] border border-[#35594B] font-semibold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download All ({eventPurchasedItems.length} Event Photos · ZIP)</span>
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={handleInstantBuy}
+                  className="w-full py-3 bg-[#35594B] hover:bg-[#29473B] text-white font-semibold text-sm rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
+                >
+                  <span>Instant Buy with M-Pesa</span>
+                </button>
+
+                <button
+                  onClick={handleToggleCart}
+                  className={`w-full py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 ${
+                    inCart
+                      ? 'bg-[#B66D4D] text-white'
+                      : 'bg-[#FAF8F5] hover:bg-[#F4F0E7] text-[#252723] border border-[#DCD8CE]'
+                  }`}
+                >
+                  {inCart ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Item In Cart (Remove)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add to Cart ({formatKES(photo.priceKes)})</span>
+                    </>
+                  )}
+                </button>
+              </>
+            )}
 
             <div className="flex items-center justify-between pt-2 text-[11px] text-[#696B65]">
               <button

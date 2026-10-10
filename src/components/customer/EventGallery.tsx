@@ -12,6 +12,9 @@ import {
   Sparkles,
   ShoppingBag,
   RotateCcw,
+  Download,
+  CheckCircle2,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface EventGalleryProps {
@@ -25,7 +28,16 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
   onBack,
   onOpenReportModal,
 }) => {
-  const { events, photos, photographers, cart, setIsCartOpen, getCartTotals } = useApp();
+  const {
+    events,
+    photos,
+    photographers,
+    cart,
+    setIsCartOpen,
+    getCartTotals,
+    getPurchasedPhotosForEvent,
+    openDownloadAllModal,
+  } = useApp();
 
   const event = events.find((e) => e.id === eventId);
   const photographer = photographers.find((p) => p.id === event?.photographerId);
@@ -35,6 +47,16 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
   const [selectedSession, setSelectedSession] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'code_asc' | 'code_desc' | 'time'>('code_asc');
+  const [filterPurchasedOnly, setFilterPurchasedOnly] = useState<boolean>(false);
+
+  // Purchased photos by this customer for this event
+  const purchasedItems = useMemo(() => {
+    return getPurchasedPhotosForEvent(eventId);
+  }, [getPurchasedPhotosForEvent, eventId]);
+
+  const purchasedPhotoIds = useMemo(() => {
+    return new Set(purchasedItems.map((p) => p.item.photoId));
+  }, [purchasedItems]);
 
   const eventPhotos = useMemo(() => {
     return photos.filter((p) => p.eventId === eventId && p.status === 'published');
@@ -73,6 +95,11 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
           return false;
         }
 
+        // Purchased only filter
+        if (filterPurchasedOnly && !purchasedPhotoIds.has(photo.id)) {
+          return false;
+        }
+
         return true;
       })
       .sort((a, b) => {
@@ -80,7 +107,7 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
         if (sortBy === 'code_desc') return b.code.localeCompare(a.code, undefined, { numeric: true });
         return new Date(b.captureTimestamp).getTime() - new Date(a.captureTimestamp).getTime();
       });
-  }, [eventPhotos, searchCode, selectedSession, selectedCategory, sortBy]);
+  }, [eventPhotos, searchCode, selectedSession, selectedCategory, sortBy, filterPurchasedOnly, purchasedPhotoIds]);
 
   const totals = getCartTotals();
 
@@ -114,13 +141,14 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
     setSearchCode('');
     setSelectedSession('all');
     setSelectedCategory('all');
+    setFilterPurchasedOnly(false);
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 pb-20">
       
       {/* Back button */}
-      <div>
+      <div className="flex items-center justify-between">
         <button
           onClick={onBack}
           className="inline-flex items-center gap-2 text-sm text-[#696B65] hover:text-[#252723] transition-colors"
@@ -128,7 +156,72 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
           <ArrowLeft className="w-4 h-4" />
           <span>Back to All Events</span>
         </button>
+
+        {purchasedItems.length > 0 && (
+          <button
+            onClick={() =>
+              openDownloadAllModal({
+                customItems: purchasedItems,
+                eventTitle: event.title,
+              })
+            }
+            className="sm:hidden px-3.5 py-1.5 bg-[#35594B] text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Download All ({purchasedItems.length})</span>
+          </button>
+        )}
       </div>
+
+      {/* Customer Delivery Banner for Purchased Event Photos */}
+      {purchasedItems.length > 0 && (
+        <section className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-5 animate-in fade-in duration-300">
+          <div className="flex items-start gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-emerald-100 border border-emerald-300/80 text-emerald-800 flex items-center justify-center shrink-0 shadow-xs">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-serif text-lg sm:text-xl font-bold text-emerald-950">
+                  You Have {purchasedItems.length} Purchased {purchasedItems.length === 1 ? 'Photo' : 'Photos'} in This Event
+                </h2>
+                <span className="text-[10px] bg-emerald-200/90 text-emerald-900 font-mono font-bold px-2 py-0.5 rounded">
+                  AUTHENTICATED MASTERS
+                </span>
+              </div>
+              <p className="text-xs text-emerald-800/90 leading-relaxed max-w-2xl">
+                Your watermark-free, 24MP full-resolution master files are unlocked and ready for instant delivery and download.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() =>
+                openDownloadAllModal({
+                  customItems: purchasedItems,
+                  eventTitle: event.title,
+                })
+              }
+              className="px-5 py-2.5 bg-[#35594B] hover:bg-[#29473B] text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-sm transition-all hover:shadow"
+            >
+              <Download className="w-4 h-4" />
+              <span>Download All ({purchasedItems.length} Photos · ZIP)</span>
+            </button>
+
+            <button
+              onClick={() => setFilterPurchasedOnly(!filterPurchasedOnly)}
+              className={`px-4 py-2.5 rounded-xl text-xs font-semibold border transition-all ${
+                filterPurchasedOnly
+                  ? 'bg-emerald-800 text-white border-emerald-800'
+                  : 'bg-white hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+              }`}
+            >
+              {filterPurchasedOnly ? 'Show Full Gallery' : 'View Purchased Only'}
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Event Header Banner */}
       <section className="bg-white border border-[#DCD8CE] rounded-xl p-6 sm:p-8 space-y-6 shadow-sm">
@@ -220,18 +313,35 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
             )}
           </div>
 
-          {/* Sort By Dropdown */}
-          <div className="flex items-center gap-2 text-xs text-[#696B65]">
-            <span>Sort:</span>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-[#FAF8F5] border border-[#DCD8CE] text-[#252723] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#35594B]"
-            >
-              <option value="code_asc">Photo Code (Ascending)</option>
-              <option value="code_desc">Photo Code (Descending)</option>
-              <option value="time">Capture Time (Latest)</option>
-            </select>
+          {/* Sort By Dropdown & Purchased Filter */}
+          <div className="flex items-center gap-3">
+            {purchasedItems.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilterPurchasedOnly(!filterPurchasedOnly)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  filterPurchasedOnly
+                    ? 'bg-emerald-800 text-white shadow-xs'
+                    : 'bg-emerald-50 text-emerald-900 hover:bg-emerald-100 border border-emerald-200'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Purchased ({purchasedItems.length})</span>
+              </button>
+            )}
+
+            <div className="flex items-center gap-2 text-xs text-[#696B65]">
+              <span>Sort:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="bg-[#FAF8F5] border border-[#DCD8CE] text-[#252723] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#35594B]"
+              >
+                <option value="code_asc">Photo Code (Ascending)</option>
+                <option value="code_desc">Photo Code (Descending)</option>
+                <option value="time">Capture Time (Latest)</option>
+              </select>
+            </div>
           </div>
 
         </div>
@@ -307,13 +417,30 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
       {/* Photos Grid */}
       <section className="space-y-4">
         <div className="flex items-center justify-between text-xs text-[#696B65]">
-          <span>
-            Showing <strong className="text-[#252723]">{filteredPhotos.length}</strong> of {eventPhotos.length} photos
-          </span>
-          {(searchCode || selectedSession !== 'all' || selectedCategory !== 'all') && (
+          <div className="flex items-center gap-3">
+            <span>
+              Showing <strong className="text-[#252723]">{filteredPhotos.length}</strong> of {eventPhotos.length} photos
+              {filterPurchasedOnly && <span className="ml-1 text-emerald-800 font-medium">(Purchased Only)</span>}
+            </span>
+            {filterPurchasedOnly && purchasedItems.length > 0 && (
+              <button
+                onClick={() =>
+                  openDownloadAllModal({
+                    customItems: purchasedItems,
+                    eventTitle: event.title,
+                  })
+                }
+                className="text-[#35594B] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download All ({purchasedItems.length})</span>
+              </button>
+            )}
+          </div>
+          {(searchCode || selectedSession !== 'all' || selectedCategory !== 'all' || filterPurchasedOnly) && (
             <button
               onClick={resetFilters}
-              className="text-[#35594B] hover:underline flex items-center gap-1 font-medium"
+              className="text-[#35594B] hover:underline flex items-center gap-1 font-medium cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
               <span>Reset active filters</span>

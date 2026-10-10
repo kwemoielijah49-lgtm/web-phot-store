@@ -126,8 +126,24 @@ interface AppContextType {
   resolveModerationReport: (reportId: string, action: 'takedown' | 'dismiss') => void;
   updatePlatformSettings: (updates: Partial<PlatformSettings>) => void;
 
-  // Media Download
+  // Media Download & Delivery
   verifyAndDownloadOriginal: (orderId: string, photoId: string) => { allowed: boolean; originalUrl?: string; error?: string };
+  downloadModalState: {
+    isOpen: boolean;
+    order?: Order | null;
+    customItems?: { item: OrderItem; photo?: Photo; order: Order }[];
+    eventTitle?: string;
+  };
+  openDownloadAllModal: (params: {
+    order?: Order | null;
+    customItems?: { item: OrderItem; photo?: Photo; order: Order }[];
+    eventTitle?: string;
+  }) => void;
+  closeDownloadAllModal: () => void;
+  customerOrderIds: string[];
+  getCustomerPaidOrders: () => Order[];
+  getPurchasedPhotosForEvent: (eventId: string) => { order: Order; item: OrderItem; photo?: Photo }[];
+  isPhotoPurchased: (photoId: string) => { isPurchased: boolean; order?: Order; item?: OrderItem };
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -393,6 +409,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activePaymentModal, setActivePaymentModal] = useState<boolean>(false);
   const [latestPaidOrder, setLatestPaidOrder] = useState<Order | null>(null);
 
+  const [downloadModalState, setDownloadModalState] = useState<{
+    isOpen: boolean;
+    order?: Order | null;
+    customItems?: { item: OrderItem; photo?: Photo; order: Order }[];
+    eventTitle?: string;
+  }>({
+    isOpen: false,
+  });
+
+  const [customerOrderIds, setCustomerOrderIds] = useState<string[]>(() => {
+    try {
+      const saved = getInitialStorageItem('customer_order_ids');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    // Pre-seed with sample graduation order ord_uon_0981 so user can immediately test download all
+    return ['ord_uon_0981'];
+  });
+
+  const openDownloadAllModal = (params: {
+    order?: Order | null;
+    customItems?: { item: OrderItem; photo?: Photo; order: Order }[];
+    eventTitle?: string;
+  }) => {
+    setDownloadModalState({
+      isOpen: true,
+      order: params.order,
+      customItems: params.customItems,
+      eventTitle: params.eventTitle,
+    });
+  };
+
+  const closeDownloadAllModal = () => {
+    setDownloadModalState((prev) => ({ ...prev, isOpen: false }));
+  };
+
   // Cart
   const [cart, setCart] = useState<OrderItem[]>(() => {
     try {
@@ -538,10 +589,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(`${STORAGE_KEY_PREFIX}moderation_reports`, JSON.stringify(moderationReports));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}audit_events`, JSON.stringify(auditEvents));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}platform_settings`, JSON.stringify(platformSettings));
+      localStorage.setItem(`${STORAGE_KEY_PREFIX}customer_order_ids`, JSON.stringify(customerOrderIds));
     } catch (e) {
       console.warn('Storage sync error', e);
     }
-  }, [events, photos, orders, photographers, paymentAttempts, refundRequests, moderationReports, auditEvents, platformSettings]);
+  }, [events, photos, orders, photographers, paymentAttempts, refundRequests, moderationReports, auditEvents, platformSettings, customerOrderIds]);
 
   // Log Audit Event helper
   const logAudit = (event: Omit<AuditEvent, 'id' | 'timestamp'>) => {
@@ -800,6 +852,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     clearCart();
     setLatestPaidOrder(updatedOrder);
+    setCustomerOrderIds((prev) => (prev.includes(updatedOrder.id) ? prev : [updatedOrder.id, ...prev]));
 
     return {
       success: true,
@@ -871,6 +924,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     return { allowed: true, originalUrl: photo.originalUrl };
+  };
+
+  // Helper: Retrieve all valid paid orders owned by the customer
+  const getCustomerPaidOrders = (): Order[] => {
+    return orders.filter((o) => {
+      if (o.status !== 'paid') return false;
+      if (latestPaidOrder?.id === o.id) return true;
+      if (customerOrderIds.includes(o.id)) return true;
+      if (firebaseUser?.email && o.customerEmail?.toLowerCase() === firebaseUser.email.toLowerCase()) return true;
+      return false;
+    });
+  };
+
+  // Helper: Retrieve all purchased photos for a specific event
+  const getPurchasedPhotosForEvent = (eventId: string) => {
+    const paidOrders = getCustomerPaidOrders().filter((o) => o.eventId === eventId);
+    const results: { order: Order; item: OrderItem; photo?: Photo }[] = [];
+    const seenPhotoIds = new Set<string>();
+
+    paidOrders.forEach((order) => {
+      order.items.forEach((item) => {
+        if (!seenPhotoIds.has(item.photoId)) {
+          seenPhotoIds.add(item.photoId);
+          const photo = photos.find((p) => p.id === item.photoId);
+          results.push({ order, item, photo });
+        }
+      });
+    });
+
+    return results;
+  };
+
+  // Helper: Check if a specific photo has been purchased by the customer
+  const isPhotoPurchased = (photoId: string): { isPurchased: boolean; order?: Order; item?: OrderItem } => {
+    const paidOrders = getCustomerPaidOrders();
+    for (const order of paidOrders) {
+      const item = order.items.find((i) => i.photoId === photoId);
+      if (item) {
+        return { isPurchased: true, order, item };
+      }
+    }
+    return { isPurchased: false };
   };
 
   // Customer: Submit Refund Request
@@ -1267,6 +1362,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         resolveModerationReport,
         updatePlatformSettings,
         verifyAndDownloadOriginal,
+        downloadModalState,
+        openDownloadAllModal,
+        closeDownloadAllModal,
+        customerOrderIds,
+        getCustomerPaidOrders,
+        getPurchasedPhotosForEvent,
+        isPhotoPurchased,
       }}
     >
       {children}

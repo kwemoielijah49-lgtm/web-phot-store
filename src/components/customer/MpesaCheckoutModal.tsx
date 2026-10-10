@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { formatKES, validateAndFormatMpesaPhone } from '../../utils/mpesa';
+import { Order } from '../../types';
 import {
   X,
   Smartphone,
@@ -11,6 +12,7 @@ import {
   Lock,
   ArrowRight,
   RotateCcw,
+  Download,
 } from 'lucide-react';
 
 export const MpesaCheckoutModal: React.FC = () => {
@@ -23,6 +25,7 @@ export const MpesaCheckoutModal: React.FC = () => {
     completeMpesaPayment,
     failMpesaPayment,
     setCurrentView,
+    openDownloadAllModal,
   } = useApp();
 
   const [customerPhone, setCustomerPhone] = useState('0712345678');
@@ -35,6 +38,7 @@ export const MpesaCheckoutModal: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [activeAttemptId, setActiveAttemptId] = useState<string | null>(null);
   const [completedReceipt, setCompletedReceipt] = useState<string | null>(null);
+  const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
   const [duplicateNotice, setDuplicateNotice] = useState<string | null>(null);
 
   if (!activePaymentModal) return null;
@@ -80,6 +84,7 @@ export const MpesaCheckoutModal: React.FC = () => {
       setLoading(false);
       if (res.success && res.order) {
         setCompletedReceipt(res.order.mpesaReference || 'QDF7781N89');
+        setCompletedOrder(res.order);
         setStep('success');
       } else {
         setErrorMsg(res.message);
@@ -333,18 +338,27 @@ export const MpesaCheckoutModal: React.FC = () => {
                 </p>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
                 <button
-                  onClick={handleViewPurchases}
-                  className="flex-1 py-3 bg-[#35594B] hover:bg-[#29473B] text-white font-semibold rounded-xl text-xs transition-colors shadow-sm"
+                  onClick={() => {
+                    const ord = completedOrder;
+                    handleClose();
+                    if (ord) {
+                      openDownloadAllModal({ order: ord });
+                    } else {
+                      setCurrentView('my_orders');
+                    }
+                  }}
+                  className="flex-1 py-3 bg-[#35594B] hover:bg-[#29473B] text-white font-semibold rounded-xl text-xs transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  Download Master Files Now
+                  <Download className="w-4 h-4" />
+                  <span>Download All Photos (.zip)</span>
                 </button>
                 <button
-                  onClick={handleClose}
-                  className="px-4 py-3 bg-white hover:bg-[#FAF8F5] text-[#252723] border border-[#DCD8CE] rounded-xl text-xs font-medium transition-colors"
+                  onClick={handleViewPurchases}
+                  className="px-4 py-3 bg-white hover:bg-[#FAF8F5] text-[#252723] border border-[#DCD8CE] rounded-xl text-xs font-semibold transition-colors cursor-pointer"
                 >
-                  Close
+                  View in My Orders
                 </button>
               </div>
             </div>

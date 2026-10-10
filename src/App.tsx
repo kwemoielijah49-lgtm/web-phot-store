@@ -19,6 +19,7 @@ import { RefundModal } from './components/customer/RefundModal';
 import { PhotographerDashboard } from './components/photographer/PhotographerDashboard';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { ThemeFontCustomizer } from './components/customizer/ThemeFontCustomizer';
+import { DownloadAllModal } from './components/customer/DownloadAllModal';
 import { Photo, Order } from './types';
 
 const MainContent: React.FC = () => {
@@ -31,6 +32,8 @@ const MainContent: React.FC = () => {
     setSelectedPhotoForLightbox,
     isCustomizerOpen,
     setIsCustomizerOpen,
+    downloadModalState,
+    closeDownloadAllModal,
   } = useApp();
 
   // Modals triggered from multiple views
@@ -112,6 +115,15 @@ const MainContent: React.FC = () => {
       <ThemeFontCustomizer
         isOpen={isCustomizerOpen}
         onClose={() => setIsCustomizerOpen(false)}
+      />
+
+      {/* High-Resolution Photo Delivery Download All Modal */}
+      <DownloadAllModal
+        isOpen={downloadModalState.isOpen}
+        onClose={closeDownloadAllModal}
+        order={downloadModalState.order}
+        customItems={downloadModalState.customItems}
+        eventTitle={downloadModalState.eventTitle}
       />
     </div>
   );
