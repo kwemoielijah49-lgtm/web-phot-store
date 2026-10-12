@@ -191,3 +191,20 @@ export interface PlatformSettings {
   payoutSchedule: 'weekly' | 'instant_till' | 'manual';
   emergencySupportPhone: string;
 }
+
+export type MembershipRole = 'owner' | 'manager' | 'staff' | 'editor';
+export type MembershipStatus = 'active' | 'revoked' | 'pending';
+
+export interface PhotographerMembership {
+  id: string;
+  userId: string;
+  userEmail: string;
+  userName?: string;
+  photographerId: string;
+  photographerBusinessName: string;
+  role: MembershipRole;
+  status: MembershipStatus;
+  invitedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}

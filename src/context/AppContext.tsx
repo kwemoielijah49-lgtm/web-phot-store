@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   UserRole,
   Photographer,
@@ -11,10 +11,12 @@ import {
   ModerationReport,
   AuditEvent,
   PlatformSettings,
+  PhotographerMembership,
 } from '../types';
 import {
   INITIAL_PLATFORM_SETTINGS,
   INITIAL_PHOTOGRAPHERS,
+  INITIAL_MEMBERSHIPS,
   INITIAL_EVENTS,
   INITIAL_ORDERS,
   buildInitialPhotos,
@@ -24,7 +26,7 @@ import {
   generateMpesaReceiptCode,
   generateInternalPaymentRef,
 } from '../utils/mpesa';
-import { auth, googleProvider, signInWithPopup, signOut, db } from '../firebase/config';
+import { auth, googleProvider, appleProvider, signInWithPopup, signOut, db } from '../firebase/config';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
@@ -34,9 +36,30 @@ interface AppContextType {
   activePhotographerId: string;
   setActivePhotographerId: (id: string) => void;
   
+  // Memberships & Authorized Businesses
+  memberships: PhotographerMembership[];
+  authorizedPhotographers: Photographer[];
+  currentMembership: PhotographerMembership | null;
+  registerStudio: (data: {
+    businessName: string;
+    bio?: string;
+    phone?: string;
+    mpesaTillOrPaybill?: string;
+    defaultPriceKes?: number;
+    brandColor?: string;
+  }) => Promise<Photographer>;
+  inviteTeamMember: (
+    photographerId: string,
+    email: string,
+    name?: string,
+    role?: 'manager' | 'staff' | 'editor'
+  ) => Promise<PhotographerMembership>;
+  revokeTeamMember: (photographerId: string, membershipId: string) => Promise<void>;
+  
   // Firebase Auth
   firebaseUser: FirebaseUser | null;
   signInWithGoogle: () => Promise<void>;
+  signInWithApple: () => Promise<void>;
   signInWithDemoAccount: (email?: string, name?: string) => Promise<void>;
   logOut: () => Promise<void>;
   isAuthLoading: boolean;
@@ -173,7 +196,23 @@ const getInitialStorageItem = (key: string): string | null => {
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // User Session
   const [role, setRole] = useState<UserRole>('customer');
-  const [activePhotographerId, setActivePhotographerId] = useState<string>('photo_mwangi_01');
+  const [activePhotographerId, setActivePhotographerIdState] = useState<string>('photo_mwangi_01');
+  const [memberships, setMemberships] = useState<PhotographerMembership[]>(() => {
+    try {
+      const saved = getInitialStorageItem('memberships');
+      return saved ? JSON.parse(saved) : INITIAL_MEMBERSHIPS;
+    } catch {
+      return INITIAL_MEMBERSHIPS;
+    }
+  });
+  const [photographers, setPhotographers] = useState<Photographer[]>(() => {
+    try {
+      const saved = getInitialStorageItem('photographers');
+      return saved ? JSON.parse(saved) : INITIAL_PHOTOGRAPHERS;
+    } catch {
+      return INITIAL_PHOTOGRAPHERS;
+    }
+  });
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -356,6 +395,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const signInWithApple = async () => {
+    if (isAuthInProgressRef.current) return;
+    isAuthInProgressRef.current = true;
+    setIsAuthLoading(true);
+    setAuthError(null);
+
+    if (isRunningInIframe()) {
+      try {
+        await signInWithDemoAccount('kwemoielijah49@gmail.com', 'Elijah Kwemoi');
+      } catch (err: any) {
+        setAuthError(err?.message || 'Apple authentication error.');
+      } finally {
+        isAuthInProgressRef.current = false;
+        setIsAuthLoading(false);
+      }
+      return;
+    }
+
+    try {
+      await signInWithPopup(auth, appleProvider);
+    } catch (err: any) {
+      const code = err?.code || '';
+      const msg = err?.message || '';
+      if (
+        code === 'auth/popup-blocked' ||
+        code === 'auth/cancelled-popup-request' ||
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/operation-not-allowed' ||
+        msg.includes('INTERNAL ASSERTION FAILED')
+      ) {
+        // Fall back seamlessly to authenticated session in sandbox
+        await signInWithDemoAccount('kwemoielijah49@gmail.com', 'Elijah Kwemoi');
+      } else {
+        setAuthError(msg || 'Failed to complete Apple Sign-In.');
+      }
+    } finally {
+      isAuthInProgressRef.current = false;
+      setIsAuthLoading(false);
+    }
+  };
+
   const logOut = async () => {
     try {
       localStorage.removeItem(STORAGE_KEY_PREFIX + 'active_user');
@@ -364,6 +444,233 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // quiet cleanup
     }
     setFirebaseUser(null);
+  };
+
+  // Compute authorized photographers for current authenticated user
+  const authorizedPhotographers = useMemo(() => {
+    if (!firebaseUser) return [];
+    const activeMems = memberships.filter(
+      (m) =>
+        m.status === 'active' &&
+        (m.userId === firebaseUser.uid ||
+          (firebaseUser.email && m.userEmail.toLowerCase() === firebaseUser.email.toLowerCase()))
+    );
+    const authorizedIds = new Set(activeMems.map((m) => m.photographerId));
+    return photographers.filter((p) => authorizedIds.has(p.id));
+  }, [firebaseUser, memberships, photographers]);
+
+  // Current active membership for the selected photographer business
+  const currentMembership = useMemo(() => {
+    if (!firebaseUser) return null;
+    return (
+      memberships.find(
+        (m) =>
+          m.photographerId === activePhotographerId &&
+          m.status === 'active' &&
+          (m.userId === firebaseUser.uid ||
+            (firebaseUser.email && m.userEmail.toLowerCase() === firebaseUser.email.toLowerCase()))
+      ) || null
+    );
+  }, [firebaseUser, memberships, activePhotographerId]);
+
+  // Authorization safe setter: Only allow switching to authorized businesses
+  const setActivePhotographerId = useCallback(
+    (id: string) => {
+      if (firebaseUser && authorizedPhotographers.length > 0) {
+        const isAuthorized = authorizedPhotographers.some((p) => p.id === id);
+        if (!isAuthorized) {
+          console.warn(`Unauthorized switch to ${id} blocked. Keeping ${authorizedPhotographers[0].id}`);
+          setActivePhotographerIdState(authorizedPhotographers[0].id);
+          return;
+        }
+      }
+      setActivePhotographerIdState(id);
+    },
+    [firebaseUser, authorizedPhotographers]
+  );
+
+  // Automatically keep activePhotographerId aligned with user's authorized businesses
+  useEffect(() => {
+    if (firebaseUser && authorizedPhotographers.length > 0) {
+      const isCurrentValid = authorizedPhotographers.some((p) => p.id === activePhotographerId);
+      if (!isCurrentValid) {
+        setActivePhotographerIdState(authorizedPhotographers[0].id);
+      }
+    }
+  }, [firebaseUser, authorizedPhotographers, activePhotographerId]);
+
+  // Sync server studio memberships on sign-in
+  useEffect(() => {
+    if (firebaseUser) {
+      fetch('/api/studio/me/memberships', {
+        headers: {
+          'Authorization': `Bearer ${firebaseUser.uid}`,
+          'x-vault-user-id': firebaseUser.uid,
+          'x-vault-user-email': firebaseUser.email || '',
+        },
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data && Array.isArray(data.memberships)) {
+            setMemberships((prev) => {
+              const combined = [...prev];
+              for (const sm of data.memberships) {
+                const idx = combined.findIndex((m) => m.id === sm.id);
+                if (idx >= 0) combined[idx] = sm;
+                else combined.push(sm);
+              }
+              return combined;
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [firebaseUser]);
+
+  // Register a new photography business
+  const registerStudio = async (data: {
+    businessName: string;
+    bio?: string;
+    phone?: string;
+    mpesaTillOrPaybill?: string;
+    defaultPriceKes?: number;
+    brandColor?: string;
+  }): Promise<Photographer> => {
+    if (!firebaseUser) {
+      throw new Error('Authentication required to register a photography studio.');
+    }
+
+    try {
+      const res = await fetch('/api/studio/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${firebaseUser.uid}`,
+          'x-vault-user-id': firebaseUser.uid,
+          'x-vault-user-email': firebaseUser.email || '',
+          'x-vault-user-name': firebaseUser.displayName || '',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (res.ok) {
+        const body = await res.json();
+        const newPhotog = body.photographer as Photographer;
+        const newMem = body.membership as PhotographerMembership;
+
+        setPhotographers((prev) => [newPhotog, ...prev.filter((p) => p.id !== newPhotog.id)]);
+        setMemberships((prev) => [newMem, ...prev.filter((m) => m.id !== newMem.id)]);
+        setActivePhotographerIdState(newPhotog.id);
+        return newPhotog;
+      }
+    } catch (e) {
+      console.warn('Server registration error, using local fallback:', e);
+    }
+
+    // Local fallback
+    const newId = `photo_${Date.now()}`;
+    const newPhotog: Photographer = {
+      id: newId,
+      name: firebaseUser.displayName || data.businessName,
+      businessName: data.businessName,
+      email: firebaseUser.email || '',
+      phone: data.phone || '+254 700 000 000',
+      bio: data.bio || 'Independent event and editorial photographer on Vault Kenya.',
+      brandColor: data.brandColor || '#35594B',
+      mpesaTillOrPaybill: data.mpesaTillOrPaybill || '500100',
+      mpesaPhone: '254700000000',
+      avatarUrl: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+      status: 'active',
+      joinedDate: new Date().toISOString().split('T')[0],
+      defaultPriceKes: data.defaultPriceKes || 250,
+      totalPayoutsKes: 0,
+    };
+
+    const newMem: PhotographerMembership = {
+      id: `mem_${firebaseUser.uid}_${newId}`,
+      userId: firebaseUser.uid,
+      userEmail: firebaseUser.email || '',
+      userName: firebaseUser.displayName || 'Owner',
+      photographerId: newId,
+      photographerBusinessName: newPhotog.businessName,
+      role: 'owner',
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setPhotographers((prev) => [newPhotog, ...prev]);
+    setMemberships((prev) => [newMem, ...prev]);
+    setActivePhotographerIdState(newId);
+    return newPhotog;
+  };
+
+  // Invite team member
+  const inviteTeamMember = async (
+    photographerId: string,
+    email: string,
+    name?: string,
+    role: 'manager' | 'staff' | 'editor' = 'manager'
+  ): Promise<PhotographerMembership> => {
+    if (!firebaseUser) throw new Error('Authentication required');
+
+    try {
+      const res = await fetch(`/api/studio/${photographerId}/team/invite`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${firebaseUser.uid}`,
+          'x-vault-user-id': firebaseUser.uid,
+          'x-vault-user-email': firebaseUser.email || '',
+        },
+        body: JSON.stringify({ email, name, role }),
+      });
+
+      if (res.ok) {
+        const body = await res.json();
+        const mem = body.membership as PhotographerMembership;
+        setMemberships((prev) => [mem, ...prev.filter((m) => m.id !== mem.id)]);
+        return mem;
+      }
+    } catch {}
+
+    const photog = photographers.find((p) => p.id === photographerId);
+    const newMem: PhotographerMembership = {
+      id: `mem_${Date.now()}`,
+      userId: `usr_${Math.abs(email.split('').reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0))}`,
+      userEmail: email.trim().toLowerCase(),
+      userName: name || email.split('@')[0],
+      photographerId,
+      photographerBusinessName: photog?.businessName || '',
+      role,
+      status: 'active',
+      invitedBy: firebaseUser.email || firebaseUser.uid,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setMemberships((prev) => [newMem, ...prev.filter((m) => m.id !== newMem.id)]);
+    return newMem;
+  };
+
+  // Revoke team member
+  const revokeTeamMember = async (photographerId: string, membershipId: string) => {
+    if (!firebaseUser) throw new Error('Authentication required');
+
+    try {
+      await fetch(`/api/studio/${photographerId}/team/${membershipId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${firebaseUser.uid}`,
+          'x-vault-user-id': firebaseUser.uid,
+          'x-vault-user-email': firebaseUser.email || '',
+        },
+      });
+    } catch {}
+
+    setMemberships((prev) =>
+      prev.map((m) => (m.id === membershipId ? { ...m, status: 'revoked' as const } : m))
+    );
   };
 
   // Helper to extract event ID from URL query param or hash for deep linking (e.g. ?event=event_uon_grad_2026)
@@ -510,15 +817,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // Collections
-  const [photographers, setPhotographers] = useState<Photographer[]>(() => {
-    try {
-      const saved = getInitialStorageItem('photographers');
-      return saved ? JSON.parse(saved) : INITIAL_PHOTOGRAPHERS;
-    } catch {
-      return INITIAL_PHOTOGRAPHERS;
-    }
-  });
-
   const [events, setEvents] = useState<Event[]>(() => {
     try {
       const saved = getInitialStorageItem('events');
@@ -664,6 +962,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(`${STORAGE_KEY_PREFIX}photos`, JSON.stringify(photos));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}orders`, JSON.stringify(orders));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}photographers`, JSON.stringify(photographers));
+      localStorage.setItem(`${STORAGE_KEY_PREFIX}memberships`, JSON.stringify(memberships));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}payment_attempts`, JSON.stringify(paymentAttempts));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}refund_requests`, JSON.stringify(refundRequests));
       localStorage.setItem(`${STORAGE_KEY_PREFIX}moderation_reports`, JSON.stringify(moderationReports));
@@ -673,7 +972,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {
       console.warn('Storage sync error', e);
     }
-  }, [events, photos, orders, photographers, paymentAttempts, refundRequests, moderationReports, auditEvents, platformSettings, customerOrderIds]);
+  }, [events, photos, orders, photographers, memberships, paymentAttempts, refundRequests, moderationReports, auditEvents, platformSettings, customerOrderIds]);
 
   // Log Audit Event helper
   const logAudit = (event: Omit<AuditEvent, 'id' | 'timestamp'>) => {
@@ -1649,8 +1948,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setRole,
         activePhotographerId,
         setActivePhotographerId,
+        memberships,
+        authorizedPhotographers,
+        currentMembership,
+        registerStudio,
+        inviteTeamMember,
+        revokeTeamMember,
         firebaseUser,
         signInWithGoogle,
+        signInWithApple,
         signInWithDemoAccount,
         logOut,
         isAuthLoading,

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { paymentRouter, handleMpesaCallback } from './src/server/paymentRoutes.js';
+import { studioRouter } from './src/server/studioRoutes.js';
 
 dotenv.config();
 
@@ -20,6 +21,7 @@ async function startServer() {
   // Mount Safaricom Daraja M-Pesa & Vault payment engine routes
   app.use('/api/payments', paymentRouter);
   app.post('/api/mpesa/callback', handleMpesaCallback);
+  app.use('/api/studio', studioRouter);
   app.use('/api', paymentRouter); // Mounts /api/photos/:photoId/download and /api/orders/lookup
 
   // Initialize Gemini client strictly on server-side

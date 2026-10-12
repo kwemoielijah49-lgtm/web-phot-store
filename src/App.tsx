@@ -17,6 +17,8 @@ import { PhotoLightbox } from './components/customer/PhotoLightbox';
 import { ReportPhotoModal } from './components/customer/ReportPhotoModal';
 import { RefundModal } from './components/customer/RefundModal';
 import { PhotographerDashboard } from './components/photographer/PhotographerDashboard';
+import { PhotographerSignInView } from './components/photographer/PhotographerSignInView';
+import { StudioOnboardingView } from './components/photographer/StudioOnboardingView';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { ThemeFontCustomizer } from './components/customizer/ThemeFontCustomizer';
 import { DownloadAllModal } from './components/customer/DownloadAllModal';
@@ -34,6 +36,8 @@ const MainContent: React.FC = () => {
     setIsCustomizerOpen,
     downloadModalState,
     closeDownloadAllModal,
+    firebaseUser,
+    authorizedPhotographers,
   } = useApp();
 
   // Modals triggered from multiple views
@@ -78,7 +82,15 @@ const MainContent: React.FC = () => {
           />
         )}
 
-        {currentView === 'studio' && <PhotographerDashboard />}
+        {currentView === 'studio' && (
+          !firebaseUser ? (
+            <PhotographerSignInView />
+          ) : authorizedPhotographers.length === 0 ? (
+            <StudioOnboardingView />
+          ) : (
+            <PhotographerDashboard />
+          )
+        )}
 
         {currentView === 'admin' && <AdminDashboard />}
       </main>

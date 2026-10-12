@@ -23,6 +23,11 @@ import {
   Smartphone,
   Percent,
   ArrowUpRight,
+  Users,
+  UserPlus,
+  ShieldCheck,
+  LogOut,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const PhotographerDashboard: React.FC = () => {
@@ -30,6 +35,13 @@ export const PhotographerDashboard: React.FC = () => {
     activePhotographerId,
     setActivePhotographerId,
     photographers,
+    authorizedPhotographers,
+    memberships,
+    currentMembership,
+    inviteTeamMember,
+    revokeTeamMember,
+    firebaseUser,
+    logOut,
     events,
     photos,
     orders,
@@ -42,10 +54,21 @@ export const PhotographerDashboard: React.FC = () => {
     setCurrentView,
   } = useApp();
 
-  const photographer = photographers.find((p) => p.id === activePhotographerId) || photographers[0];
+  // ISOLATION: Strict fallback only to authorized businesses
+  const photographer =
+    authorizedPhotographers.find((p) => p.id === activePhotographerId) ||
+    authorizedPhotographers[0] ||
+    photographers[0];
 
   // Active tab in studio
-  const [activeTab, setActiveTab] = useState<'events' | 'mpesa_analytics' | 'orders' | 'refunds' | 'originals'>('mpesa_analytics');
+  const [activeTab, setActiveTab] = useState<'events' | 'mpesa_analytics' | 'orders' | 'refunds' | 'originals' | 'team'>('mpesa_analytics');
+
+  // Team invite state
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteName, setInviteName] = useState('');
+  const [inviteRole, setInviteRole] = useState<'manager' | 'staff' | 'editor'>('manager');
+  const [inviteStatusMessage, setInviteStatusMessage] = useState<string | null>(null);
 
   // Modals
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -76,6 +99,10 @@ export const PhotographerDashboard: React.FC = () => {
     const orderIds = new Set(myOrders.map((o) => o.id));
     return refundRequests.filter((r) => orderIds.has(r.orderId));
   }, [refundRequests, myOrders]);
+
+  const myTeam = useMemo(() => {
+    return memberships.filter((m) => m.photographerId === photographer.id);
+  }, [memberships, photographer.id]);
 
   // Financial summary
   const grossSalesKes = myOrders
@@ -156,25 +183,92 @@ export const PhotographerDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Account Switcher for Testing Isolation */}
-        <div className="bg-[#FAF8F5] border border-[#DCD8CE] p-4 rounded-xl space-y-2 shrink-0 sm:min-w-[280px]">
-          <label className="block text-[11px] font-mono text-[#696B65] uppercase tracking-wider">
-            Switch Photographer Account
-          </label>
-          <select
-            value={activePhotographerId}
-            onChange={(e) => setActivePhotographerId(e.target.value)}
-            className="w-full bg-white border border-[#DCD8CE] rounded-lg p-2 text-[#252723] text-xs font-semibold focus:outline-none focus:border-[#35594B]"
-          >
-            {photographers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.businessName} ({p.name})
-              </option>
-            ))}
-          </select>
-          <p className="text-[11px] text-[#696B65]">
-            Enforces strict data isolation between photography businesses.
-          </p>
+        {/* Authenticated Identity & Authorized Account Switcher */}
+        <div className="bg-[#FAF8F5] border border-[#DCD8CE] p-4 rounded-xl space-y-3 shrink-0 sm:min-w-[320px]">
+          {/* Authenticated User Identity */}
+          <div className="flex items-center justify-between gap-3 pb-2.5 border-b border-[#DCD8CE]">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-full bg-[#35594B]/15 text-[#35594B] flex items-center justify-center font-bold text-xs shrink-0">
+                {firebaseUser?.displayName?.charAt(0) || firebaseUser?.email?.charAt(0) || 'U'}
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <p className="font-semibold text-xs text-[#252723] truncate">
+                    {firebaseUser?.displayName || 'Authorized Photographer'}
+                  </p>
+                  <span className={`text-[10px] font-mono font-bold uppercase px-1.5 py-0.2 rounded ${
+                    currentMembership?.role === 'owner'
+                      ? 'bg-[#35594B]/10 text-[#35594B]'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {currentMembership?.role || 'Member'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-[#696B65] font-mono truncate">
+                  {firebaseUser?.email}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => logOut()}
+              className="px-2 py-1 hover:bg-rose-50 text-rose-700 rounded text-[11px] font-medium transition-colors shrink-0 flex items-center gap-1"
+              title="Sign Out of Studio"
+            >
+              <LogOut className="w-3 h-3" />
+              <span className="hidden sm:inline">Sign Out</span>
+            </button>
+          </div>
+
+          {/* Account Selector (Strictly for Authorized Businesses) */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <label className="font-mono text-[#696B65] uppercase tracking-wider">
+                Authorized Studio
+              </label>
+              <span className="text-[10px] font-mono text-[#35594B] font-semibold">
+                {authorizedPhotographers.length} Authorized
+              </span>
+            </div>
+
+            {authorizedPhotographers.length > 1 ? (
+              <select
+                value={photographer.id}
+                onChange={(e) => setActivePhotographerId(e.target.value)}
+                className="w-full bg-white border border-[#DCD8CE] hover:border-[#35594B] rounded-lg p-2 text-[#252723] text-xs font-semibold focus:outline-none focus:border-[#35594B] shadow-sm transition-colors"
+              >
+                {authorizedPhotographers.map((p) => {
+                  const mem = memberships.find(
+                    (m) =>
+                      m.photographerId === p.id &&
+                      m.status === 'active' &&
+                      (m.userId === firebaseUser?.uid ||
+                        m.userEmail.toLowerCase() === firebaseUser?.email?.toLowerCase())
+                  );
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {p.businessName} ({mem?.role === 'owner' ? 'Owner' : 'Manager'})
+                    </option>
+                  );
+                })}
+              </select>
+            ) : (
+              <div className="flex items-center justify-between bg-white border border-[#DCD8CE] rounded-lg p-2 text-xs">
+                <span className="font-semibold text-[#252723] truncate">
+                  {photographer.businessName}
+                </span>
+                <span className="text-[10px] font-mono text-[#35594B] bg-[#35594B]/10 px-1.5 py-0.5 rounded font-bold shrink-0 ml-2">
+                  Isolated Account
+                </span>
+              </div>
+            )}
+
+            <p className="text-[10px] text-[#696B65] leading-tight">
+              {authorizedPhotographers.length > 1
+                ? 'Strictly isolated to businesses associated with your verified account.'
+                : 'Access restricted to your verified photography business.'}
+            </p>
+          </div>
         </div>
       </section>
 
@@ -376,6 +470,18 @@ export const PhotographerDashboard: React.FC = () => {
           >
             Original Masters ({myPhotos.length})
           </button>
+
+          <button
+            onClick={() => setActiveTab('team')}
+            className={`px-4 py-2 font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
+              activeTab === 'team'
+                ? 'bg-[#35594B] text-white shadow-sm'
+                : 'text-[#696B65] hover:text-[#252723]'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Team & Access ({myTeam.length})</span>
+          </button>
         </div>
 
         {activeTab === 'events' && (
@@ -385,6 +491,22 @@ export const PhotographerDashboard: React.FC = () => {
           >
             <Plus className="w-4 h-4" />
             <span>Create New Event</span>
+          </button>
+        )}
+
+        {activeTab === 'team' && (
+          <button
+            onClick={() => {
+              setInviteEmail('');
+              setInviteName('');
+              setInviteRole('manager');
+              setInviteStatusMessage(null);
+              setIsInviteModalOpen(true);
+            }}
+            className="px-4 py-2 bg-[#35594B] hover:bg-[#29473B] text-white font-medium rounded-lg text-xs flex items-center gap-1.5 transition-colors shadow-sm self-start sm:self-auto"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Invite Team Member</span>
           </button>
         )}
       </div>
@@ -734,6 +856,241 @@ export const PhotographerDashboard: React.FC = () => {
             ))}
           </div>
         </section>
+      )}
+
+      {/* TAB 5: Team & Access Manager */}
+      {activeTab === 'team' && (
+        <section className="space-y-6">
+          <div className="bg-white border border-[#DCD8CE] rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="font-serif text-lg font-bold text-[#252723]">
+                  Authorized Studio Team & Access Permissions
+                </h3>
+                <p className="text-xs text-[#696B65]">
+                  Manage which authenticated accounts have permission to view financials, edit galleries, and upload photos for {photographer.businessName}.
+                </p>
+              </div>
+
+              {currentMembership?.role === 'owner' && (
+                <button
+                  onClick={() => {
+                    setInviteEmail('');
+                    setInviteName('');
+                    setInviteRole('manager');
+                    setInviteStatusMessage(null);
+                    setIsInviteModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-[#35594B] hover:bg-[#29473B] text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors shrink-0"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Add Team Member</span>
+                </button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-[#DCD8CE] text-[#696B65] font-mono uppercase text-[11px]">
+                    <th className="py-3 px-3">Team Member</th>
+                    <th className="py-3 px-3">Email Address</th>
+                    <th className="py-3 px-3">Assigned Role</th>
+                    <th className="py-3 px-3">Access Status</th>
+                    <th className="py-3 px-3">Added Date</th>
+                    <th className="py-3 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#DCD8CE]">
+                  {myTeam.map((mem) => {
+                    const isSelf = mem.userEmail.toLowerCase() === firebaseUser?.email?.toLowerCase();
+                    const isPrimaryOwner = mem.role === 'owner';
+
+                    return (
+                      <tr key={mem.id} className="hover:bg-[#FAF8F5] transition-colors">
+                        <td className="py-3 px-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-[#35594B]/10 text-[#35594B] font-bold flex items-center justify-center text-xs">
+                              {mem.userName?.charAt(0) || mem.userEmail.charAt(0).toUpperCase()}
+                            </div>
+                            <span className="font-semibold text-[#252723]">
+                              {mem.userName || mem.userEmail.split('@')[0]}
+                              {isSelf && ' (You)'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-[#696B65]">
+                          {mem.userEmail}
+                        </td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                              mem.role === 'owner'
+                                ? 'bg-[#35594B]/15 text-[#35594B]'
+                                : mem.role === 'manager'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            {mem.role}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                              mem.status === 'active'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {mem.status === 'active' ? '● Active' : '✕ Revoked'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-[#696B65] font-mono">
+                          {mem.createdAt ? new Date(mem.createdAt).toLocaleDateString() : 'Initial'}
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          {currentMembership?.role === 'owner' && !isPrimaryOwner && mem.status === 'active' && (
+                            <button
+                              onClick={async () => {
+                                if (confirm(`Revoke access for ${mem.userEmail}?`)) {
+                                  await revokeTeamMember(photographer.id, mem.id);
+                                }
+                              }}
+                              className="px-2 py-1 text-rose-700 hover:bg-rose-50 border border-rose-200 rounded font-medium text-[11px] transition-colors"
+                            >
+                              Revoke Access
+                            </button>
+                          )}
+                          {isPrimaryOwner && (
+                            <span className="text-[11px] text-[#696B65] font-mono">
+                              Primary Owner
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="bg-[#FAF8F5] border border-[#DCD8CE] rounded-xl p-3.5 text-[11px] text-[#696B65] flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-[#35594B] shrink-0" />
+              <span>
+                All account membership changes take effect immediately on both client and backend servers. Revoked accounts lose access to all financial data, orders, and event assets.
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Invite Team Member Modal */}
+      {isInviteModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white border border-[#DCD8CE] rounded-2xl p-6 sm:p-8 max-w-md w-full space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-[#DCD8CE]">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-[#35594B]" />
+                <h3 className="font-serif text-lg font-bold text-[#252723]">
+                  Invite Team Member
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsInviteModalOpen(false)}
+                className="text-[#696B65] hover:text-[#252723]"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-[#696B65]">
+              Grant an authenticated user manager or staff permissions to collaborate on <strong>{photographer.businessName}</strong>.
+            </p>
+
+            {inviteStatusMessage && (
+              <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs">
+                {inviteStatusMessage}
+              </div>
+            )}
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!inviteEmail.trim() || !inviteEmail.includes('@')) {
+                  setInviteStatusMessage('Please provide a valid email address.');
+                  return;
+                }
+
+                try {
+                  await inviteTeamMember(photographer.id, inviteEmail.trim(), inviteName.trim(), inviteRole);
+                  setIsInviteModalOpen(false);
+                } catch (err: any) {
+                  setInviteStatusMessage(err.message || 'Invitation failed');
+                }
+              }}
+              className="space-y-4 text-xs"
+            >
+              <div className="space-y-1">
+                <label className="font-semibold text-[#252723] block">
+                  Member Email Address *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="e.g. associate@photostudio.co.ke"
+                  className="w-full bg-[#FAF8F5] border border-[#DCD8CE] rounded-xl p-2.5 text-xs text-[#252723] focus:outline-none focus:border-[#35594B]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-semibold text-[#252723] block">
+                  Full Name (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={inviteName}
+                  onChange={(e) => setInviteName(e.target.value)}
+                  placeholder="e.g. Faith Muthoni"
+                  className="w-full bg-[#FAF8F5] border border-[#DCD8CE] rounded-xl p-2.5 text-xs text-[#252723] focus:outline-none focus:border-[#35594B]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-semibold text-[#252723] block">
+                  Membership Role
+                </label>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as any)}
+                  className="w-full bg-[#FAF8F5] border border-[#DCD8CE] rounded-xl p-2.5 text-xs text-[#252723] focus:outline-none focus:border-[#35594B]"
+                >
+                  <option value="manager">Authorized Manager (Full gallery, orders & analytics)</option>
+                  <option value="staff">Studio Staff (Upload & view photos only)</option>
+                  <option value="editor">Gallery Editor (Manage photo codes & metadata)</option>
+                </select>
+              </div>
+
+              <div className="pt-3 border-t border-[#DCD8CE] flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsInviteModalOpen(false)}
+                  className="px-3 py-2 bg-[#FAF8F5] text-[#252723] border border-[#DCD8CE] rounded-xl font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-[#35594B] hover:bg-[#29473B] text-white font-semibold rounded-xl transition-colors shadow-sm"
+                >
+                  Confirm & Grant Access
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Refund Review Prompt Modal */}

@@ -1,4 +1,4 @@
-import { Photographer, Event, Photo, Order, PlatformSettings } from '../types';
+import { Photographer, Event, Photo, Order, PlatformSettings, PhotographerMembership } from '../types';
 import { createSyntheticPhotoCanvas, generateWatermarkedPreview, generateThumbnail } from './imageProcessor';
 
 export const INITIAL_PLATFORM_SETTINGS: PlatformSettings = {
@@ -9,6 +9,93 @@ export const INITIAL_PLATFORM_SETTINGS: PlatformSettings = {
   payoutSchedule: 'weekly',
   emergencySupportPhone: '+254 700 123 456',
 };
+
+export const INITIAL_MEMBERSHIPS: PhotographerMembership[] = [
+  {
+    id: 'mem_elijah_mwangi',
+    userId: 'usr_kwemoielijah49',
+    userEmail: 'kwemoielijah49@gmail.com',
+    userName: 'Elijah Kwemoi',
+    photographerId: 'photo_mwangi_01',
+    photographerBusinessName: 'Mwangi Creative Media',
+    role: 'owner',
+    status: 'active',
+    createdAt: '2025-01-15T00:00:00Z',
+    updatedAt: '2025-01-15T00:00:00Z',
+  },
+  {
+    id: 'mem_elijah_amina',
+    userId: 'usr_kwemoielijah49',
+    userEmail: 'kwemoielijah49@gmail.com',
+    userName: 'Elijah Kwemoi',
+    photographerId: 'photo_amina_02',
+    photographerBusinessName: 'Luxe Flora & Weddings',
+    role: 'manager',
+    status: 'active',
+    createdAt: '2025-03-20T00:00:00Z',
+    updatedAt: '2025-03-20T00:00:00Z',
+  },
+  {
+    id: 'mem_david_mwangi',
+    userId: 'usr_david_mwangi',
+    userEmail: 'david@mwangimedia.co.ke',
+    userName: 'David Mwangi',
+    photographerId: 'photo_mwangi_01',
+    photographerBusinessName: 'Mwangi Creative Media',
+    role: 'owner',
+    status: 'active',
+    createdAt: '2025-01-15T00:00:00Z',
+    updatedAt: '2025-01-15T00:00:00Z',
+  },
+  {
+    id: 'mem_amina_wanjiku',
+    userId: 'usr_amina_wanjiku',
+    userEmail: 'amina@luxeweddings.ke',
+    userName: 'Amina Wanjiku',
+    photographerId: 'photo_amina_02',
+    photographerBusinessName: 'Luxe Flora & Weddings',
+    role: 'owner',
+    status: 'active',
+    createdAt: '2025-03-20T00:00:00Z',
+    updatedAt: '2025-03-20T00:00:00Z',
+  },
+  {
+    id: 'mem_josphat_kiprono',
+    userId: 'usr_josphat_kiprono',
+    userEmail: 'josphat@riftvalleysports.co.ke',
+    userName: 'Josphat Kiprono',
+    photographerId: 'photo_kip_03',
+    photographerBusinessName: 'Rift Valley Sports & Media',
+    role: 'owner',
+    status: 'active',
+    createdAt: '2025-06-10T00:00:00Z',
+    updatedAt: '2025-06-10T00:00:00Z',
+  },
+  {
+    id: 'mem_assistant_mwangi',
+    userId: 'usr_assistant_mwangi',
+    userEmail: 'assistant@mwangimedia.co.ke',
+    userName: 'Studio Assistant',
+    photographerId: 'photo_mwangi_01',
+    photographerBusinessName: 'Mwangi Creative Media',
+    role: 'staff',
+    status: 'active',
+    createdAt: '2025-07-01T00:00:00Z',
+    updatedAt: '2025-07-01T00:00:00Z',
+  },
+  {
+    id: 'mem_revoked_mwangi',
+    userId: 'usr_former_agent',
+    userEmail: 'former_agent@mwangimedia.co.ke',
+    userName: 'Former Agent',
+    photographerId: 'photo_mwangi_01',
+    photographerBusinessName: 'Mwangi Creative Media',
+    role: 'staff',
+    status: 'revoked',
+    createdAt: '2025-02-01T00:00:00Z',
+    updatedAt: '2025-05-01T00:00:00Z',
+  },
+];
 
 export const INITIAL_PHOTOGRAPHERS: Photographer[] = [
   {

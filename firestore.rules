@@ -71,6 +71,26 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Memberships Collection
+    match /memberships/{membershipId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.userEmail == request.auth.token.email || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && (incoming().userId == request.auth.uid || isAdmin());
+      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Photographers Collection
+    match /photographers/{photographerId} {
+      allow read: if true; // Public discovery of verified photographers
+      allow create, update: if isSignedIn() && (
+        isAdmin() ||
+        request.auth.token.email == resource.data.email ||
+        exists(/databases/$(database)/documents/memberships/$(request.auth.uid + '_' + photographerId))
+      );
+      allow delete: if isAdmin();
+    }
+
     // Connection testing endpoint for health check
     match /test/connection {
       allow read, write: if true;
