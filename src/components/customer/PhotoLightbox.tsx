@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Photo, Event } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { formatKES } from '../../utils/mpesa';
-import { X, Plus, Check, ShieldCheck, Flag, Download, CheckCircle2, Loader2 } from 'lucide-react';
+import { X, Plus, Check, ShieldCheck, Flag, Download, CheckCircle2, Loader2, Camera, Share2 } from 'lucide-react';
 import { triggerSingleDownload } from '../../utils/downloadHelper';
 
 interface PhotoLightboxProps {
@@ -35,6 +35,26 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
   const inCart = isInCart(photo.id);
   const { isPurchased, order } = isPhotoPurchased(photo.id);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [copiedLightboxLink, setCopiedLightboxLink] = useState(false);
+
+  const handleLightboxShareWhatsapp = () => {
+    const shareUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}${window.location.pathname}?event=${photo.eventId}`
+      : `https://vault-photography.co.ke/?event=${photo.eventId}`;
+    const text = `📸 Check out photo [${photo.code}] from *${event?.title || 'the event'}* on Vault!\n\n👉 View gallery: ${shareUrl}`;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleLightboxCopyLink = async () => {
+    const shareUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}${window.location.pathname}?event=${photo.eventId}`
+      : `https://vault-photography.co.ke/?event=${photo.eventId}`;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopiedLightboxLink(true);
+      setTimeout(() => setCopiedLightboxLink(false), 2200);
+    } catch {}
+  };
 
   const eventPurchasedItems = event ? getPurchasedPhotosForEvent(event.id) : [];
 
@@ -48,14 +68,21 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
   }, [onClose]);
 
   const handleDownloadMaster = async () => {
-    if (!order) return;
+    if (!order) {
+      alert('Payment required: You must purchase this photo before downloading.');
+      return;
+    }
     setIsDownloading(true);
     try {
       const verification = verifyAndDownloadOriginal(order.id, photo.id);
-      const urlToUse = verification.allowed && verification.originalUrl ? verification.originalUrl : photo.originalUrl;
-      await triggerSingleDownload(urlToUse, `${photo.code}_ORIGINAL_24MP.jpg`);
-    } catch (err) {
+      if (!verification.allowed || !verification.originalUrl) {
+        alert(verification.error || 'Download not authorized. Please complete verified payment.');
+        return;
+      }
+      await triggerSingleDownload(verification.originalUrl, `${photo.code}_ORIGINAL_24MP.jpg`);
+    } catch (err: any) {
       console.error('Download error:', err);
+      alert(err.message || 'Download failed');
     } finally {
       setTimeout(() => setIsDownloading(false), 800);
     }
@@ -94,12 +121,31 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
 
         {/* Media Preview Column */}
         <div className="relative flex-1 bg-[#181917] flex items-center justify-center min-h-[360px] lg:min-h-[540px] p-4 select-none">
-          <img
-            src={photo.previewWatermarkedUrl || photo.thumbnailUrl}
-            alt={`Photo ${photo.code}`}
-            referrerPolicy="no-referrer"
-            className="max-h-[70vh] w-auto max-w-full object-contain mx-auto"
-          />
+          {(() => {
+            const photoLightboxSrc = (photo.previewWatermarkedUrl && photo.previewWatermarkedUrl.trim() !== '')
+              ? photo.previewWatermarkedUrl.trim()
+              : ((photo.thumbnailUrl && photo.thumbnailUrl.trim() !== '')
+                ? photo.thumbnailUrl.trim()
+                : ((photo.originalUrl && photo.originalUrl.trim() !== '') ? photo.originalUrl.trim() : null));
+
+            if (!photoLightboxSrc) {
+              return (
+                <div className="flex flex-col items-center justify-center text-white/60 p-8 text-center">
+                  <Camera className="w-12 h-12 mb-2 text-white/40" />
+                  <span className="font-mono text-xs">{photo.code}</span>
+                </div>
+              );
+            }
+
+            return (
+              <img
+                src={photoLightboxSrc}
+                alt={`Photo ${photo.code}`}
+                referrerPolicy="no-referrer"
+                className="max-h-[70vh] w-auto max-w-full object-contain mx-auto"
+              />
+            );
+          })()}
 
           {/* Persistent security watermark across display */}
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
@@ -257,18 +303,44 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({
               </>
             )}
 
-            <div className="flex items-center justify-between pt-2 text-[11px] text-[#696B65]">
-              <button
-                onClick={() => {
-                  onClose();
-                  onOpenReportModal?.(photo);
-                }}
-                className="hover:text-rose-700 transition-colors flex items-center gap-1"
-              >
-                <Flag className="w-3 h-3" />
-                <span>Report Content</span>
-              </button>
-              <span className="font-mono">Code: {photo.code}</span>
+            <div className="flex items-center justify-between pt-2.5 text-[11px] text-[#696B65] border-t border-[#DCD8CE]">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleLightboxShareWhatsapp}
+                  className="hover:text-[#25D366] transition-colors flex items-center gap-1 cursor-pointer font-medium"
+                  title="Share to WhatsApp"
+                >
+                  <Share2 className="w-3 h-3 text-[#25D366]" />
+                  <span>WhatsApp</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLightboxCopyLink}
+                  className="hover:text-[#35594B] transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Copy gallery link"
+                >
+                  {copiedLightboxLink ? (
+                    <span className="text-emerald-700 font-semibold">Link Copied!</span>
+                  ) : (
+                    <span>Copy Link</span>
+                  )}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    onClose();
+                    onOpenReportModal?.(photo);
+                  }}
+                  className="hover:text-rose-700 transition-colors flex items-center gap-1"
+                >
+                  <Flag className="w-3 h-3" />
+                  <span>Report</span>
+                </button>
+                <span className="font-mono">Code: {photo.code}</span>
+              </div>
             </div>
           </div>
 

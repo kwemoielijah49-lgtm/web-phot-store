@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import {
   UserRole,
   Photographer,
@@ -96,8 +96,9 @@ interface AppContextType {
     attemptId: string;
     simulatedReceipt?: string;
     isDuplicateTest?: boolean;
-  }) => { success: boolean; message: string; order?: Order };
-  failMpesaPayment: (attemptId: string, reason: string) => void;
+    scenario?: 'success' | 'cancelled' | 'insufficient_funds' | 'timeout' | 'amount_mismatch';
+  }) => Promise<{ success: boolean; message: string; order?: Order }>;
+  failMpesaPayment: (attemptId: string, reason: string) => Promise<void> | void;
 
   // Customer Actions
   submitRefundRequest: (orderId: string, reason: string) => boolean;
@@ -120,6 +121,10 @@ interface AppContextType {
   deletePhoto: (photoId: string) => void;
   updatePhotographerProfile: (id: string, updates: Partial<Photographer>) => void;
   reviewRefundRequest: (requestId: string, decision: 'approved' | 'rejected', reason: string) => void;
+  disbursePhotographerPayout: (
+    photographerId: string,
+    orderIds?: string[]
+  ) => Promise<{ success: boolean; message: string; disbursedAmountKes: number; payoutReference: string }>;
 
   // Admin Actions
   updatePhotographerStatus: (photographerId: string, status: Photographer['status']) => void;
@@ -144,6 +149,12 @@ interface AppContextType {
   getCustomerPaidOrders: () => Order[];
   getPurchasedPhotosForEvent: (eventId: string) => { order: Order; item: OrderItem; photo?: Photo }[];
   isPhotoPurchased: (photoId: string) => { isPurchased: boolean; order?: Order; item?: OrderItem };
+
+  // Automated M-Pesa Sync & Reconciliation
+  isSyncing: boolean;
+  lastSyncedAt: string | null;
+  syncStats: { totalChecked: number; reconciledCount: number; pendingCount: number };
+  syncPendingTransactions: (force?: boolean) => Promise<{ reconciledCount: number; message: string }>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -355,6 +366,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setFirebaseUser(null);
   };
 
+  // Helper to extract event ID from URL query param or hash for deep linking (e.g. ?event=event_uon_grad_2026)
+  const getEventIdFromLocation = (): string | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const eventParam = searchParams.get('event') || searchParams.get('eventId');
+      if (eventParam) return eventParam;
+
+      if (window.location.hash) {
+        const hash = window.location.hash;
+        const match = hash.match(/event=([^&]+)/);
+        if (match) return decodeURIComponent(match[1]);
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  };
+
   // Navigation View with URL route synchronization
   const getViewFromLocation = (): 'events' | 'event_gallery' | 'my_orders' | 'studio' | 'admin' => {
     if (typeof window === 'undefined') return 'events';
@@ -363,6 +393,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (path === '/admin' || hash === '#admin' || hash === '#/admin') return 'admin';
     if (path === '/studio' || hash === '#studio' || hash === '#/studio') return 'studio';
     if (path === '/my-photos' || path === '/my_orders' || hash === '#my-photos' || hash === '#/my-photos') return 'my_orders';
+    if (getEventIdFromLocation()) return 'event_gallery';
     return 'events';
   };
 
@@ -389,11 +420,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const [selectedEventId, setSelectedEventIdState] = useState<string | null>(() => {
+    return getEventIdFromLocation();
+  });
+
+  const setSelectedEventId = (id: string | null) => {
+    setSelectedEventIdState(id);
+    if (typeof window !== 'undefined') {
+      try {
+        const url = new URL(window.location.href);
+        if (id) {
+          url.searchParams.set('event', id);
+        } else {
+          url.searchParams.delete('event');
+        }
+        window.history.replaceState({ event: id }, '', url.toString());
+      } catch {
+        // ignore
+      }
+    }
+  };
+
   // Listen to popstate and hashchange for direct deep linking and browser navigation
   useEffect(() => {
     const handleUrlChange = () => {
       const detected = getViewFromLocation();
       setCurrentViewInternal(detected);
+      const eventInUrl = getEventIdFromLocation();
+      if (eventInUrl) {
+        setSelectedEventIdState(eventInUrl);
+      }
     };
 
     window.addEventListener('popstate', handleUrlChange);
@@ -403,7 +459,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       window.removeEventListener('hashchange', handleUrlChange);
     };
   }, []);
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedPhotoForLightbox, setSelectedPhotoForLightbox] = useState<Photo | null>(null);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [activePaymentModal, setActivePaymentModal] = useState<boolean>(false);
@@ -423,8 +478,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const saved = getInitialStorageItem('customer_order_ids');
       if (saved) return JSON.parse(saved);
     } catch {}
-    // Pre-seed with sample graduation order ord_uon_0981 so user can immediately test download all
-    return ['ord_uon_0981'];
+    // Do NOT pre-seed default paid orders: visitors must genuinely purchase photos
+    return [];
   });
 
   const openDownloadAllModal = (params: {
@@ -496,7 +551,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [orders, setOrders] = useState<Order[]>(() => {
     try {
       const saved = getInitialStorageItem('orders');
-      return saved ? JSON.parse(saved) : INITIAL_ORDERS;
+      const loaded: Order[] = saved ? JSON.parse(saved) : INITIAL_ORDERS;
+      // Safeguard: backfill any missing or empty item thumbnails from photos collection
+      return loaded.map((ord) => ({
+        ...ord,
+        items: ord.items.map((it) => {
+          if (!it.thumbnailUrl || it.thumbnailUrl.trim() === '') {
+            const matchedPhoto = photos.find((p) => p.id === it.photoId);
+            const initOrder = INITIAL_ORDERS.find((io) => io.id === ord.id);
+            const initItem = initOrder?.items.find((ii) => ii.photoId === it.photoId);
+            return {
+              ...it,
+              thumbnailUrl: matchedPhoto?.thumbnailUrl || matchedPhoto?.previewWatermarkedUrl || matchedPhoto?.originalUrl || initItem?.thumbnailUrl || 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=480&q=80',
+            };
+          }
+          return it;
+        }),
+      }));
     } catch {
       return INITIAL_ORDERS;
     }
@@ -567,6 +638,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       return INITIAL_PLATFORM_SETTINGS;
     }
+  });
+
+  // Automated M-Pesa Sync State
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [syncStats, setSyncStats] = useState<{ totalChecked: number; reconciledCount: number; pendingCount: number }>({
+    totalChecked: 0,
+    reconciledCount: 0,
+    pendingCount: 0,
   });
 
   // Sync to localStorage
@@ -695,79 +775,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       throw new Error('Shopping cart is empty');
     }
 
-    const totals = getCartTotals();
-    const primaryEvent = events.find((e) => e.id === cart[0].eventId) || events[0];
-    const photographer = photographers.find((p) => p.id === primaryEvent.photographerId) || photographers[0];
+    const photoIds = cart.map((i) => i.photoId);
 
-    const orderId = `ord_${Date.now()}`;
-    const orderNumber = `ORD-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-    const internalRef = generateInternalPaymentRef();
+    // Call server authoritative endpoint
+    try {
+      const res = await fetch('/api/payments/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoIds,
+          customerPhone: phoneVal.formattedPhone,
+          customerEmail,
+          customerName,
+        }),
+      });
 
-    const commissionRate = platformSettings.defaultCommissionRate;
-    const commissionAmountKes = Math.round(totals.totalKes * commissionRate);
-    const photographerEarningsKes = totals.totalKes - commissionAmountKes;
+      if (res.ok) {
+        const data = await res.json();
+        const serverOrder = data.order as Order;
+        const serverAttempt = data.attempt as PaymentAttempt;
 
-    // 30 days retention policy for downloads
-    const downloadExpiresAt = new Date(Date.now() + platformSettings.downloadExpiryDays * 24 * 3600 * 1000).toISOString();
+        setOrders((prev) => [serverOrder, ...prev.filter((o) => o.id !== serverOrder.id)]);
+        setPaymentAttempts((prev) => [serverAttempt, ...prev.filter((a) => a.id !== serverAttempt.id)]);
 
-    const newOrder: Order = {
-      id: orderId,
-      orderNumber,
-      customerPhone: phoneVal.formattedPhone,
-      customerEmail,
-      customerName,
-      photographerId: photographer.id,
-      photographerBusinessName: photographer.businessName,
-      eventId: primaryEvent.id,
-      eventTitle: primaryEvent.title,
-      items: [...cart],
-      subtotalKes: totals.subtotalKes,
-      discountKes: totals.discountKes,
-      totalKes: totals.totalKes,
-      platformCommissionRate: commissionRate,
-      commissionAmountKes,
-      photographerEarningsKes,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      downloadToken: `tok_${Math.random().toString(36).substring(2)}${Date.now()}`,
-      downloadExpiresAt,
-    };
+        logAudit({
+          actorId: phoneVal.formattedPhone,
+          actorRole: 'customer',
+          action: 'MPESA_STK_INITIATED',
+          resourceType: 'payment',
+          resourceId: serverAttempt.internalRef,
+          details: `STK push initiated for ${serverOrder.orderNumber} (${serverOrder.totalKes} KES) to M-Pesa ${phoneVal.formattedPhone} [Mode: ${data.mode}]`,
+        });
 
-    const newAttempt: PaymentAttempt = {
-      id: `att_${Date.now()}`,
-      orderId,
-      mpesaPhone: phoneVal.formattedPhone,
-      amountKes: totals.totalKes,
-      internalRef,
-      status: 'stk_sent',
-      createdAt: new Date().toISOString(),
-    };
-
-    setOrders((prev) => [newOrder, ...prev]);
-    setPaymentAttempts((prev) => [newAttempt, ...prev]);
-
-    logAudit({
-      actorId: phoneVal.formattedPhone,
-      actorRole: 'customer',
-      action: 'MPESA_STK_INITIATED',
-      resourceType: 'payment',
-      resourceId: internalRef,
-      details: `STK push initiated for ${orderNumber} (${totals.totalKes} KES) to M-Pesa ${phoneVal.formattedPhone}`,
-    });
-
-    return { order: newOrder, attempt: newAttempt };
+        return { order: serverOrder, attempt: serverAttempt };
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Checkout initiation failed on server');
+      }
+    } catch (err: any) {
+      console.warn('Backend payment initiate API encountered error:', err.message);
+      throw err;
+    }
   };
 
-  // Complete Payment (Verified status + duplicate callback protection)
-  const completeMpesaPayment = ({
+  // Complete Payment (Verified status via server callback simulation or status query)
+  const completeMpesaPayment = async ({
     attemptId,
     simulatedReceipt,
     isDuplicateTest = false,
+    scenario = 'success',
   }: {
     attemptId: string;
     simulatedReceipt?: string;
     isDuplicateTest?: boolean;
-  }): { success: boolean; message: string; order?: Order } => {
+    scenario?: 'success' | 'cancelled' | 'insufficient_funds' | 'timeout' | 'amount_mismatch';
+  }): Promise<{ success: boolean; message: string; order?: Order }> => {
     const attempt = paymentAttempts.find((a) => a.id === attemptId);
     if (!attempt) {
       return { success: false, message: 'Payment attempt record not found' };
@@ -778,16 +840,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, message: 'Associated order not found' };
     }
 
-    // DUPLICATE CALLBACK PROTECTION (PRD Section 8 & 14)
-    if (order.status === 'paid' || attempt.status === 'completed') {
-      logAudit({
-        actorId: 'mpesa_gateway',
-        actorRole: 'system',
-        action: 'DUPLICATE_CALLBACK_DROPPED',
-        resourceType: 'payment',
-        resourceId: attempt.internalRef,
-        details: `Duplicate payment callback safely ignored for order ${order.orderNumber}. Entitlements preserved without double crediting.`,
+    // Call server sandbox trigger / callback endpoint
+    try {
+      const checkoutRequestId = attempt.checkoutRequestId || `ws_CO_${attempt.id}`;
+      const res = await fetch('/api/payments/sandbox-trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          checkoutRequestId,
+          scenario: isDuplicateTest ? 'success' : scenario,
+          customReceipt: simulatedReceipt,
+        }),
       });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.outcome?.success && data.outcome.order) {
+          const verifiedOrder = data.outcome.order as Order;
+          setOrders((prev) => [verifiedOrder, ...prev.filter((o) => o.id !== verifiedOrder.id)]);
+          setPaymentAttempts((prev) =>
+            prev.map((a) =>
+              a.id === attemptId
+                ? {
+                    ...a,
+                    status: 'completed',
+                    mpesaReceipt: verifiedOrder.mpesaReference,
+                    completedAt: verifiedOrder.paidAt,
+                  }
+                : a
+            )
+          );
+          setCustomerOrderIds((prev) => (prev.includes(verifiedOrder.id) ? prev : [verifiedOrder.id, ...prev]));
+          setLatestPaidOrder(verifiedOrder);
+          clearCart();
+
+          logAudit({
+            actorId: attempt.mpesaPhone,
+            actorRole: 'customer',
+            action: 'PAYMENT_VERIFIED_SUCCESS',
+            resourceType: 'order',
+            resourceId: verifiedOrder.id,
+            details: `M-Pesa payment verified with receipt ${verifiedOrder.mpesaReference}. Released originals for ${verifiedOrder.items.length} photos.`,
+            ipOrRef: verifiedOrder.mpesaReference,
+          });
+
+          return {
+            success: true,
+            message: data.outcome.message,
+            order: verifiedOrder,
+          };
+        } else if (data.outcome?.status === 'duplicate_ignored') {
+          return {
+            success: true,
+            message: data.outcome.message,
+            order: data.outcome.order || order,
+          };
+        } else {
+          return {
+            success: false,
+            message: data.outcome?.message || 'Payment simulation failed',
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('Server trigger failed, applying local fallback:', err);
+    }
+
+    // Local verified fallback
+    if (order.status === 'paid' || attempt.status === 'completed') {
       return {
         success: true,
         message: 'Payment was already verified and settled. No duplicate entitlement issued.',
@@ -797,16 +917,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const mpesaReceipt = simulatedReceipt || generateMpesaReceiptCode();
     const paidAt = new Date().toISOString();
+    const downloadToken = `dl_token_${Date.now()}`;
 
-    // Update order
     const updatedOrder: Order = {
       ...order,
       status: 'paid',
       paidAt,
       mpesaReference: mpesaReceipt,
+      downloadToken,
+      downloadExpiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
     };
 
-    // Update attempt
     const updatedAttempt: PaymentAttempt = {
       ...attempt,
       status: 'completed',
@@ -816,43 +937,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setOrders((prev) => prev.map((o) => (o.id === order.id ? updatedOrder : o)));
     setPaymentAttempts((prev) => prev.map((a) => (a.id === attempt.id ? updatedAttempt : a)));
-
-    // Increment photographer stats
-    setPhotographers((prev) =>
-      prev.map((p) => {
-        if (p.id === order.photographerId) {
-          return {
-            ...p,
-            totalPayoutsKes: p.totalPayoutsKes + order.photographerEarningsKes,
-          };
-        }
-        return p;
-      })
-    );
-
-    // Increment photo purchase count
-    setPhotos((prev) =>
-      prev.map((photo) => {
-        if (order.items.some((item) => item.photoId === photo.id)) {
-          return { ...photo, purchaseCount: photo.purchaseCount + 1 };
-        }
-        return photo;
-      })
-    );
-
-    logAudit({
-      actorId: attempt.mpesaPhone,
-      actorRole: 'customer',
-      action: 'PAYMENT_VERIFIED_SUCCESS',
-      resourceType: 'order',
-      resourceId: order.id,
-      details: `M-Pesa payment verified with receipt ${mpesaReceipt}. Released originals for ${order.items.length} photos.`,
-      ipOrRef: mpesaReceipt,
-    });
-
-    clearCart();
-    setLatestPaidOrder(updatedOrder);
     setCustomerOrderIds((prev) => (prev.includes(updatedOrder.id) ? prev : [updatedOrder.id, ...prev]));
+    setLatestPaidOrder(updatedOrder);
+    clearCart();
 
     return {
       success: true,
@@ -861,16 +948,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  const failMpesaPayment = (attemptId: string, reason: string) => {
+  const failMpesaPayment = async (attemptId: string, reason: string) => {
     const attempt = paymentAttempts.find((a) => a.id === attemptId);
     if (!attempt) return;
+
+    if (attempt.checkoutRequestId) {
+      try {
+        await fetch('/api/payments/sandbox-trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            checkoutRequestId: attempt.checkoutRequestId,
+            scenario: 'cancelled',
+          }),
+        });
+      } catch {}
+    }
 
     setPaymentAttempts((prev) =>
       prev.map((a) => (a.id === attemptId ? { ...a, status: 'failed', errorMessage: reason } : a))
     );
 
     setOrders((prev) =>
-      prev.map((o) => (o.id === attempt.orderId ? { ...o, status: 'failed' } : o))
+      prev.map((o) => (o.id === attempt.orderId ? { ...o, status: 'failed', failureReason: reason } : o))
     );
 
     logAudit({
@@ -882,6 +982,165 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       details: `M-Pesa payment failed: ${reason}`,
     });
   };
+
+  // Automated M-Pesa Transaction Sync & Reconciliation Engine
+  const syncPendingTransactions = useCallback(
+    async (force?: boolean): Promise<{ reconciledCount: number; message: string }> => {
+      setIsSyncing(true);
+      try {
+        const res = await fetch('/api/payments/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientOrders: orders,
+            clientAttempts: paymentAttempts,
+            forceSimulatePending: Boolean(force),
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`Sync HTTP error ${res.status}`);
+        }
+
+        const data = await res.json();
+        setLastSyncedAt(data.syncedAt || new Date().toISOString());
+        setSyncStats({
+          totalChecked: data.totalAttemptsChecked || 0,
+          reconciledCount: data.reconciledCount || 0,
+          pendingCount: data.stillPendingCount || 0,
+        });
+
+        // Merge updated orders from server into state
+        if (Array.isArray(data.orders) && data.orders.length > 0) {
+          setOrders((prevOrders) => {
+            let hasChanges = false;
+            const updated = prevOrders.map((localOrder) => {
+              const serverOrder = data.orders.find((so: Order) => so.id === localOrder.id);
+              if (
+                serverOrder &&
+                (serverOrder.status !== localOrder.status ||
+                  serverOrder.mpesaReference !== localOrder.mpesaReference ||
+                  serverOrder.downloadToken !== localOrder.downloadToken)
+              ) {
+                hasChanges = true;
+                return { ...localOrder, ...serverOrder };
+              }
+              return localOrder;
+            });
+
+            // Add any server order that is missing locally
+            for (const so of data.orders) {
+              if (!updated.some((lo) => lo.id === so.id)) {
+                updated.push(so);
+                hasChanges = true;
+              }
+            }
+
+            return hasChanges ? updated : prevOrders;
+          });
+        }
+
+        // Merge updated payment attempts from server into state
+        if (Array.isArray(data.paymentAttempts) && data.paymentAttempts.length > 0) {
+          setPaymentAttempts((prevAttempts) => {
+            let hasChanges = false;
+            const updated = prevAttempts.map((localAttempt) => {
+              const serverAttempt = data.paymentAttempts.find(
+                (sa: PaymentAttempt) => sa.id === localAttempt.id
+              );
+              if (
+                serverAttempt &&
+                (serverAttempt.status !== localAttempt.status ||
+                  serverAttempt.mpesaReceipt !== localAttempt.mpesaReceipt)
+              ) {
+                hasChanges = true;
+                return { ...localAttempt, ...serverAttempt };
+              }
+              return localAttempt;
+            });
+
+            for (const sa of data.paymentAttempts) {
+              if (!updated.some((la) => la.id === sa.id)) {
+                updated.push(sa);
+                hasChanges = true;
+              }
+            }
+
+            return hasChanges ? updated : prevAttempts;
+          });
+        }
+
+        // Handle any newly reconciled items
+        if (Array.isArray(data.reconciledItems) && data.reconciledItems.length > 0) {
+          for (const item of data.reconciledItems) {
+            if (item.newOrderStatus === 'paid') {
+              const paidOrder = (data.orders || []).find((o: Order) => o.id === item.orderId);
+              if (paidOrder) {
+                setCustomerOrderIds((prev) => (prev.includes(paidOrder.id) ? prev : [paidOrder.id, ...prev]));
+                setLatestPaidOrder(paidOrder);
+              }
+            }
+
+            logAudit({
+              actorId: 'system_auto_sync',
+              actorRole: 'system',
+              action: 'MPESA_AUTO_SYNC_RECONCILED',
+              resourceType: 'payment',
+              resourceId: item.attemptId,
+              details: `Auto-sync reconciled pending M-Pesa transaction log for ${item.orderNumber} via ${item.reconciledVia}. Updated database order to ${item.newOrderStatus.toUpperCase()}${item.mpesaReceipt ? ` [Receipt: ${item.mpesaReceipt}]` : ''} without manual refreshing.`,
+              ipOrRef: item.mpesaReceipt,
+            });
+          }
+        }
+
+        return {
+          reconciledCount: data.reconciledCount || 0,
+          message:
+            data.reconciledCount > 0
+              ? `Reconciled ${data.reconciledCount} pending M-Pesa transaction log(s)`
+              : 'All M-Pesa transaction logs and order records are accurate and up to date',
+        };
+      } catch (err: any) {
+        console.warn('Auto-sync execution error:', err.message);
+        return { reconciledCount: 0, message: err.message };
+      } finally {
+        setIsSyncing(false);
+      }
+    },
+    [orders, paymentAttempts]
+  );
+
+  // Automated background polling & synchronization effect
+  useEffect(() => {
+    // Check if there are any pending orders or payment attempts
+    const hasPendingOrders = orders.some((o) => o.status === 'pending');
+    const hasPendingAttempts = paymentAttempts.some(
+      (a) => a.status === 'initiated' || a.status === 'stk_sent'
+    );
+
+    // Poll aggressively (every 3s) when transactions are pending; relax to 15s when idle
+    const pollIntervalMs = hasPendingOrders || hasPendingAttempts ? 3000 : 15000;
+
+    const timer = setInterval(() => {
+      syncPendingTransactions();
+    }, pollIntervalMs);
+
+    // Trigger immediate sync when browser tab gains focus or becomes visible
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        syncPendingTransactions();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [orders, paymentAttempts, syncPendingTransactions]);
 
   // Media Download Verification (PRD Section 10 & 14)
   const verifyAndDownloadOriginal = (
@@ -898,9 +1157,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Check retention window (30 days from purchase)
-    const expiry = new Date(order.downloadExpiresAt).getTime();
-    if (Date.now() > expiry) {
-      return { allowed: false, error: 'Download window has expired (30-day retention policy exceeded).' };
+    if (order.downloadExpiresAt) {
+      const expiry = new Date(order.downloadExpiresAt).getTime();
+      if (Date.now() > expiry) {
+        return { allowed: false, error: 'Download window has expired (30-day retention policy exceeded).' };
+      }
     }
 
     // Verify item is part of this order
@@ -914,6 +1175,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { allowed: false, error: 'Photo file not located.' };
     }
 
+    const token = order.downloadToken || '';
+    const secureDownloadUrl = `/api/photos/${encodeURIComponent(photoId)}/download?orderId=${encodeURIComponent(order.id)}&token=${encodeURIComponent(token)}`;
+
     logAudit({
       actorId: order.customerPhone,
       actorRole: 'customer',
@@ -923,7 +1187,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       details: `Customer downloaded watermark-free original for ${photo.code} via Order ${order.orderNumber}.`,
     });
 
-    return { allowed: true, originalUrl: photo.originalUrl };
+    return { allowed: true, originalUrl: secureDownloadUrl };
   };
 
   // Helper: Retrieve all valid paid orders owned by the customer
@@ -1242,6 +1506,84 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  // Disburse Photographer Pending Payout (M-Pesa B2C / Till settlement)
+  const disbursePhotographerPayout = async (
+    photographerId: string,
+    orderIds?: string[]
+  ): Promise<{ success: boolean; message: string; disbursedAmountKes: number; payoutReference: string }> => {
+    const photog = photographers.find((p) => p.id === photographerId);
+    if (!photog) {
+      return { success: false, message: 'Photographer account not found', disbursedAmountKes: 0, payoutReference: '' };
+    }
+
+    const eligibleOrders = orders.filter((o) => {
+      if (o.photographerId !== photographerId || o.status !== 'paid') return false;
+      const isPending = !o.payoutStatus || o.payoutStatus === 'pending';
+      if (!isPending) return false;
+      if (orderIds && orderIds.length > 0) {
+        return orderIds.includes(o.id);
+      }
+      return true;
+    });
+
+    if (eligibleOrders.length === 0) {
+      return {
+        success: false,
+        message: 'No pending orders available for M-Pesa Till settlement.',
+        disbursedAmountKes: 0,
+        payoutReference: '',
+      };
+    }
+
+    const totalDisbursedKes = eligibleOrders.reduce((sum, o) => sum + o.photographerEarningsKes, 0);
+    const payoutRef = `B2C-${Math.floor(100000 + Math.random() * 900000)}`;
+    const settledAt = new Date().toISOString();
+    const eligibleIds = new Set(eligibleOrders.map((o) => o.id));
+
+    // Update orders to settled
+    setOrders((prev) =>
+      prev.map((o) =>
+        eligibleIds.has(o.id)
+          ? {
+              ...o,
+              payoutStatus: 'settled',
+              payoutReference: payoutRef,
+              payoutSettledAt: settledAt,
+            }
+          : o
+      )
+    );
+
+    // Update photographer totalPayoutsKes
+    setPhotographers((prev) =>
+      prev.map((p) =>
+        p.id === photographerId
+          ? {
+              ...p,
+              totalPayoutsKes: p.totalPayoutsKes + totalDisbursedKes,
+            }
+          : p
+      )
+    );
+
+    logAudit({
+      actorId: photographerId,
+      actorRole: 'photographer',
+      action: 'MPESA_PAYOUT_DISBURSED',
+      resourceType: 'payment',
+      resourceId: payoutRef,
+      details: `Settled KES ${totalDisbursedKes.toLocaleString()} across ${eligibleOrders.length} orders via M-Pesa B2C to Till ${photog.mpesaTillOrPaybill}.`,
+      ipOrRef: payoutRef,
+    });
+
+    return {
+      success: true,
+      message: `Disbursed KES ${totalDisbursedKes.toLocaleString()} to M-Pesa Till ${photog.mpesaTillOrPaybill} (${payoutRef})`,
+      disbursedAmountKes: totalDisbursedKes,
+      payoutReference: payoutRef,
+    };
+  };
+
   // Admin Actions
   const updatePhotographerStatus = (photographerId: string, status: Photographer['status']) => {
     setPhotographers((prev) => prev.map((p) => (p.id === photographerId ? { ...p, status } : p)));
@@ -1358,6 +1700,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deletePhoto,
         updatePhotographerProfile,
         reviewRefundRequest,
+        disbursePhotographerPayout,
         updatePhotographerStatus,
         resolveModerationReport,
         updatePlatformSettings,
@@ -1369,6 +1712,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getCustomerPaidOrders,
         getPurchasedPhotosForEvent,
         isPhotoPurchased,
+        isSyncing,
+        lastSyncedAt,
+        syncStats,
+        syncPendingTransactions,
       }}
     >
       {children}

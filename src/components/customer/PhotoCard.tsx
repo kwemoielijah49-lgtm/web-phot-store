@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Photo, Event } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { formatKES } from '../../utils/mpesa';
-import { Plus, Check, Flag, Download, CheckCircle2, Loader2 } from 'lucide-react';
+import { Plus, Check, Flag, Download, CheckCircle2, Loader2, Camera } from 'lucide-react';
 import { triggerSingleDownload } from '../../utils/downloadHelper';
 
 interface PhotoCardProps {
@@ -40,18 +40,31 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, event, onOpenReport
 
   const handleDownloadMaster = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!order) return;
+    if (!order) {
+      alert('Payment required: You must purchase this photo before downloading.');
+      return;
+    }
     setIsDownloading(true);
     try {
       const verification = verifyAndDownloadOriginal(order.id, photo.id);
-      const urlToUse = verification.allowed && verification.originalUrl ? verification.originalUrl : photo.originalUrl;
-      await triggerSingleDownload(urlToUse, `${photo.code}_ORIGINAL_24MP.jpg`);
-    } catch (err) {
+      if (!verification.allowed || !verification.originalUrl) {
+        alert(verification.error || 'Download not authorized. Please complete verified payment.');
+        return;
+      }
+      await triggerSingleDownload(verification.originalUrl, `${photo.code}_ORIGINAL_24MP.jpg`);
+    } catch (err: any) {
       console.error('Failed to download photo:', err);
+      alert(err.message || 'Download failed');
     } finally {
       setTimeout(() => setIsDownloading(false), 800);
     }
   };
+
+  const photoPreviewSrc = (photo.thumbnailUrl && photo.thumbnailUrl.trim() !== '')
+    ? photo.thumbnailUrl.trim()
+    : ((photo.previewWatermarkedUrl && photo.previewWatermarkedUrl.trim() !== '')
+      ? photo.previewWatermarkedUrl.trim()
+      : ((photo.originalUrl && photo.originalUrl.trim() !== '') ? photo.originalUrl.trim() : null));
 
   return (
     <div
@@ -59,14 +72,21 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, event, onOpenReport
       className="group relative bg-white border border-[#DCD8CE] rounded-lg overflow-hidden hover:border-[#35594B] hover:shadow-md transition-all flex flex-col cursor-pointer"
     >
       {/* Photo Preview Container */}
-      <div className="relative aspect-[4/3] bg-[#FAF8F5] overflow-hidden select-none">
-        <img
-          src={photo.thumbnailUrl || photo.previewWatermarkedUrl}
-          alt={`Photo code ${photo.code}`}
-          referrerPolicy="no-referrer"
-          className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
-          loading="lazy"
-        />
+      <div className="relative aspect-[4/3] bg-[#FAF8F5] overflow-hidden select-none flex items-center justify-center">
+        {photoPreviewSrc ? (
+          <img
+            src={photoPreviewSrc}
+            alt={`Photo code ${photo.code}`}
+            referrerPolicy="no-referrer"
+            className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center bg-[#FAF8F5] text-[#696B65]">
+            <Camera className="w-6 h-6 text-[#35594B] mb-1" />
+            <span className="font-mono text-xs">{photo.code}</span>
+          </div>
+        )}
 
         {/* Diagonal Watermark Visual Overlay */}
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center">

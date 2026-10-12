@@ -1,6 +1,8 @@
 {
-  "name": "PichaVault - Event Photography Commerce Platform",
+  "name": "Remix PichaVault - Event Photography Commerce Platform",
   "description": "Multi-photographer digital commerce platform for Kenya: organize event galleries, secure watermarking, KES pricing, verified M-Pesa checkout, protected digital delivery, and photographer storefronts.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

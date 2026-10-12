@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { formatKES, validateAndFormatMpesaPhone } from '../../utils/mpesa';
 import { Order } from '../../types';
@@ -13,6 +13,9 @@ import {
   ArrowRight,
   RotateCcw,
   Download,
+  RefreshCw,
+  Activity,
+  Check,
 } from 'lucide-react';
 
 export const MpesaCheckoutModal: React.FC = () => {
@@ -26,6 +29,10 @@ export const MpesaCheckoutModal: React.FC = () => {
     failMpesaPayment,
     setCurrentView,
     openDownloadAllModal,
+    orders,
+    paymentAttempts,
+    syncPendingTransactions,
+    isSyncing,
   } = useApp();
 
   const [customerPhone, setCustomerPhone] = useState('0712345678');
@@ -40,6 +47,30 @@ export const MpesaCheckoutModal: React.FC = () => {
   const [completedReceipt, setCompletedReceipt] = useState<string | null>(null);
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
   const [duplicateNotice, setDuplicateNotice] = useState<string | null>(null);
+
+  // AUTOMATED SYNC LISTENER:
+  // Automatically detects when the pending transaction reconciles with the database order,
+  // transitioning to the success download screen without any manual refresh!
+  useEffect(() => {
+    if (step !== 'waiting_stk' || !activeAttemptId) return;
+
+    const attempt = paymentAttempts.find((a) => a.id === activeAttemptId);
+    const order = orders.find(
+      (o) =>
+        (attempt && o.id === attempt.orderId) ||
+        (attempt?.checkoutRequestId && o.checkoutRequestId === attempt.checkoutRequestId)
+    );
+
+    if (order?.status === 'paid' || attempt?.status === 'completed') {
+      const receipt = order?.mpesaReference || attempt?.mpesaReceipt || 'SDA9182KL4';
+      setCompletedReceipt(receipt);
+      setCompletedOrder(order || null);
+      setStep('success');
+    } else if (order?.status === 'failed' || attempt?.status === 'failed') {
+      setErrorMsg(order?.failureReason || attempt?.errorMessage || 'M-Pesa payment was cancelled or timed out.');
+      setStep('failed');
+    }
+  }, [step, activeAttemptId, orders, paymentAttempts]);
 
   if (!activePaymentModal) return null;
 
@@ -76,11 +107,11 @@ export const MpesaCheckoutModal: React.FC = () => {
     }
   };
 
-  const handleSimulatePinSuccess = () => {
+  const handleSimulatePinSuccess = async () => {
     if (!activeAttemptId) return;
     setLoading(true);
-    setTimeout(() => {
-      const res = completeMpesaPayment({ attemptId: activeAttemptId });
+    try {
+      const res = await completeMpesaPayment({ attemptId: activeAttemptId });
       setLoading(false);
       if (res.success && res.order) {
         setCompletedReceipt(res.order.mpesaReference || 'QDF7781N89');
@@ -90,18 +121,22 @@ export const MpesaCheckoutModal: React.FC = () => {
         setErrorMsg(res.message);
         setStep('failed');
       }
-    }, 700);
+    } catch (err: any) {
+      setLoading(false);
+      setErrorMsg(err.message || 'Payment verification failed');
+      setStep('failed');
+    }
   };
 
-  const handleSimulateCancel = () => {
+  const handleSimulateCancel = async () => {
     if (!activeAttemptId) return;
-    failMpesaPayment(activeAttemptId, 'Transaction cancelled by user on mobile handset');
+    await failMpesaPayment(activeAttemptId, 'Transaction cancelled by user on mobile handset');
     setStep('failed');
   };
 
-  const handleSimulateDuplicateCallback = () => {
+  const handleSimulateDuplicateCallback = async () => {
     if (!activeAttemptId) return;
-    const res = completeMpesaPayment({
+    const res = await completeMpesaPayment({
       attemptId: activeAttemptId,
       isDuplicateTest: true,
     });
@@ -251,9 +286,12 @@ export const MpesaCheckoutModal: React.FC = () => {
 
           {/* STEP 2: Waiting for M-Pesa STK push response */}
           {step === 'waiting_stk' && (
-            <div className="space-y-6 text-center py-4">
-              <div className="w-16 h-16 rounded-full bg-[#35594B]/10 border border-[#35594B]/20 flex items-center justify-center mx-auto text-[#35594B] animate-pulse">
-                <Smartphone className="w-8 h-8" />
+            <div className="space-y-5 text-center py-2">
+              <div className="relative w-16 h-16 mx-auto">
+                <div className="absolute inset-0 rounded-full bg-[#35594B]/20 animate-ping opacity-60" />
+                <div className="relative w-16 h-16 rounded-full bg-[#35594B]/10 border border-[#35594B]/30 flex items-center justify-center text-[#35594B]">
+                  <Smartphone className="w-8 h-8" />
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -261,46 +299,85 @@ export const MpesaCheckoutModal: React.FC = () => {
                   M-Pesa Prompt Sent to {customerPhone}
                 </h4>
                 <p className="text-xs text-[#696B65] max-w-sm mx-auto">
-                  Please unlock your phone and enter your 4-digit M-Pesa PIN to authorize{' '}
+                  Unlock your phone and enter your 4-digit M-Pesa PIN for{' '}
                   <strong className="text-[#252723] font-mono">{formatKES(totals.totalKes)}</strong>.
                 </p>
               </div>
 
-              {/* Interactive payment simulation controls */}
-              <div className="bg-[#FAF8F5] border border-[#DCD8CE] rounded-xl p-4 text-left space-y-3">
-                <p className="text-[11px] uppercase tracking-wider font-mono text-[#696B65]">
-                  Payment Gateway Verification Control
+              {/* Automated Real-Time Sync Status Banner */}
+              <div className="bg-[#FAF8F5] border border-[#DCD8CE] rounded-xl p-3.5 text-left space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#35594B] opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#35594B]" />
+                    </span>
+                    <span className="text-[11px] font-semibold text-[#252723] uppercase tracking-wider font-mono">
+                      Automated Sync & Reconciliation
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => syncPendingTransactions(true)}
+                    disabled={isSyncing}
+                    className="flex items-center gap-1 text-[11px] font-mono text-[#35594B] hover:text-[#29473B] font-medium"
+                    title="Force immediate reconciliation"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? 'Reconciling...' : 'Reconcile Now'}</span>
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-[#696B65] leading-relaxed">
+                  The automated reconciliation engine is continuously polling Safaricom Daraja STK Push logs. As soon as your PIN is entered, this screen transitions automatically without needing to refresh.
                 </p>
+
+                <div className="flex items-center gap-2 pt-1 border-t border-[#DCD8CE]/60 text-[10px] text-[#696B65] font-mono">
+                  <Activity className="w-3 h-3 text-[#35594B]" />
+                  <span>Polling frequency: 3s · Idempotency check active · 0 manual refresh required</span>
+                </div>
+              </div>
+
+              {/* Developer / Sandbox Simulation Controls */}
+              <div className="bg-white border border-[#DCD8CE] rounded-xl p-3.5 text-left space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] uppercase tracking-wider font-mono text-[#696B65] font-semibold">
+                    Sandbox Verification Controls
+                  </p>
+                  <span className="text-[10px] font-mono bg-[#FAF8F5] px-1.5 py-0.5 rounded text-[#35594B] border border-[#DCD8CE]">
+                    Test Mode
+                  </span>
+                </div>
                 <div className="space-y-2">
                   <button
                     onClick={handleSimulatePinSuccess}
                     disabled={loading}
-                    className="w-full py-2.5 bg-[#35594B] hover:bg-[#29473B] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+                    className="w-full py-2 bg-[#35594B] hover:bg-[#29473B] text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                   >
                     {loading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     ) : (
-                      <CheckCircle2 className="w-4 h-4" />
+                      <CheckCircle2 className="w-3.5 h-3.5" />
                     )}
-                    <span>Simulate: Customer Entered PIN & Confirmed</span>
+                    <span>Simulate Handset PIN Confirmation</span>
                   </button>
 
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={handleSimulateCancel}
-                      className="py-2 bg-white hover:bg-[#F4F0E7] text-[#252723] border border-[#DCD8CE] rounded-lg text-xs font-medium transition-colors"
+                      className="py-1.5 bg-[#FAF8F5] hover:bg-[#F4F0E7] text-[#252723] border border-[#DCD8CE] rounded-lg text-[11px] font-medium transition-colors"
                     >
-                      Simulate: Cancelled / Timeout
+                      Simulate Handset Cancel
                     </button>
                     <button
                       onClick={handleSimulateDuplicateCallback}
-                      className="py-2 bg-white hover:bg-[#F4F0E7] text-[#B66D4D] border border-[#DCD8CE] rounded-lg text-xs font-medium transition-colors"
+                      className="py-1.5 bg-[#FAF8F5] hover:bg-[#F4F0E7] text-[#B66D4D] border border-[#DCD8CE] rounded-lg text-[11px] font-medium transition-colors"
                     >
                       Test Duplicate Callback
                     </button>
                   </div>
                   {duplicateNotice && (
-                    <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-mono">
+                    <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-mono">
                       {duplicateNotice}
                     </div>
                   )}

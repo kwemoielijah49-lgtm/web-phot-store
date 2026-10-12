@@ -5,6 +5,7 @@ import { Event } from '../../types';
 import { BatchUploader } from './BatchUploader';
 import { EventEditorModal } from './EventEditorModal';
 import { PhotographerProfileModal } from './PhotographerProfileModal';
+import { MpesaTransactionDashboard } from './MpesaTransactionDashboard';
 import {
   Camera,
   Plus,
@@ -19,6 +20,9 @@ import {
   Trash2,
   Download,
   Sparkles,
+  Smartphone,
+  Percent,
+  ArrowUpRight,
 } from 'lucide-react';
 
 export const PhotographerDashboard: React.FC = () => {
@@ -41,7 +45,7 @@ export const PhotographerDashboard: React.FC = () => {
   const photographer = photographers.find((p) => p.id === activePhotographerId) || photographers[0];
 
   // Active tab in studio
-  const [activeTab, setActiveTab] = useState<'events' | 'orders' | 'refunds' | 'originals'>('events');
+  const [activeTab, setActiveTab] = useState<'events' | 'mpesa_analytics' | 'orders' | 'refunds' | 'originals'>('mpesa_analytics');
 
   // Modals
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -83,6 +87,14 @@ export const PhotographerDashboard: React.FC = () => {
     .reduce((sum, o) => sum + o.commissionAmountKes, 0);
 
   const netEarningsKes = grossSalesKes - totalCommissionsKes;
+
+  const pendingPayoutsKes = myOrders
+    .filter((o) => o.status === 'paid' && (!o.payoutStatus || o.payoutStatus === 'pending'))
+    .reduce((sum, o) => sum + o.photographerEarningsKes, 0);
+
+  const settledPayoutsKes = myOrders
+    .filter((o) => o.status === 'paid' && o.payoutStatus === 'settled')
+    .reduce((sum, o) => sum + o.photographerEarningsKes, 0);
 
   const handleOpenUploader = (ev: Event) => {
     setActiveUploadEvent(ev);
@@ -167,14 +179,17 @@ export const PhotographerDashboard: React.FC = () => {
       </section>
 
       {/* Financial Snapshot Metrics */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         
+        {/* Gross Sales */}
         <div
+          onClick={() => setActiveTab('mpesa_analytics')}
           style={{ fontFamily: 'Inter' }}
-          className="bg-white border border-[#DCD8CE] rounded-xl p-5 space-y-2 shadow-sm"
+          className="bg-white border border-[#DCD8CE] rounded-xl p-5 space-y-2 shadow-sm cursor-pointer hover:border-[#35594B] transition-all group"
+          title="Click to view M-Pesa daily revenue chart"
         >
           <div className="flex items-center justify-between text-xs text-[#696B65]">
-            <span>Gross Sales (KES)</span>
+            <span className="group-hover:text-[#35594B] transition-colors font-medium">Gross M-Pesa Sales</span>
             <DollarSign className="w-4 h-4 text-[#35594B]" />
           </div>
           <p
@@ -183,30 +198,43 @@ export const PhotographerDashboard: React.FC = () => {
           >
             {formatKES(grossSalesKes)}
           </p>
-          <p className="text-[11px] text-[#696B65]">
-            {myOrders.filter((o) => o.status === 'paid').length} completed paid customer orders
-          </p>
+          <div className="flex items-center justify-between text-[11px] text-[#696B65]">
+            <span>{myOrders.filter((o) => o.status === 'paid').length} verified orders</span>
+            <span className="text-[#35594B] font-mono text-[10px] group-hover:underline flex items-center gap-0.5">
+              Analytics <ArrowUpRight className="w-3 h-3 inline" />
+            </span>
+          </div>
         </div>
 
-        <div className="bg-white border border-[#DCD8CE] rounded-xl p-5 space-y-2 shadow-sm">
+        {/* 10% Commission */}
+        <div
+          onClick={() => setActiveTab('mpesa_analytics')}
+          className="bg-white border border-[#DCD8CE] rounded-xl p-5 space-y-2 shadow-sm cursor-pointer hover:border-[#B66D4D] transition-all group"
+          title="Click to view 10% commission deductions breakdown"
+        >
           <div className="flex items-center justify-between text-xs text-[#696B65]">
-            <span>Platform Commission (10%)</span>
-            <TrendingUp className="w-4 h-4 text-[#696B65]" />
+            <span className="text-[#B66D4D] font-bold group-hover:underline">10% Platform Fee</span>
+            <TrendingUp className="w-4 h-4 text-[#B66D4D]" />
           </div>
           <p
             style={{ fontFamily: 'Inter' }}
-            className="text-2xl font-bold font-mono tabular-nums text-[#696B65]"
+            className="text-2xl font-bold font-mono tabular-nums text-[#B66D4D]"
           >
-            {formatKES(totalCommissionsKes)}
+            -{formatKES(totalCommissionsKes)}
           </p>
           <p className="text-[11px] text-[#696B65]">
-            Deducted automatically on eligible sales
+            Deducted automatically on sales
           </p>
         </div>
 
-        <div className="bg-white border border-[#DCD8CE] rounded-xl p-5 space-y-2 shadow-sm">
+        {/* Net Take-Home */}
+        <div
+          onClick={() => setActiveTab('mpesa_analytics')}
+          className="bg-white border border-[#DCD8CE] rounded-xl p-5 space-y-2 shadow-sm cursor-pointer hover:border-[#35594B] transition-all group"
+          title="Click to view take-home earnings ledger"
+        >
           <div className="flex items-center justify-between text-xs text-[#696B65]">
-            <span>Net Take-Home Earnings</span>
+            <span className="group-hover:text-[#35594B] transition-colors font-medium">Net Take-Home (90%)</span>
             <CheckCircle2 className="w-4 h-4 text-[#35594B]" />
           </div>
           <p
@@ -219,14 +247,37 @@ export const PhotographerDashboard: React.FC = () => {
             style={{ fontFamily: 'Inter' }}
             className="text-[11px] text-[#696B65] font-mono"
           >
-            Direct M-Pesa Till settlement eligible
+            Direct Till settlement eligible
           </p>
         </div>
 
+        {/* Pending Payouts */}
+        <div
+          onClick={() => setActiveTab('mpesa_analytics')}
+          className="bg-white border border-[#DCD8CE] rounded-xl p-5 space-y-2 shadow-sm cursor-pointer hover:border-[#D97706] transition-all group"
+          title="Click to trigger Till disbursement"
+        >
+          <div className="flex items-center justify-between text-xs text-[#696B65]">
+            <span className="text-[#D97706] font-bold group-hover:underline">Pending Payout</span>
+            <Clock className="w-4 h-4 text-[#D97706]" />
+          </div>
+          <p
+            style={{ fontFamily: 'Inter' }}
+            className="text-2xl font-bold font-mono tabular-nums text-[#D97706]"
+          >
+            {formatKES(pendingPayoutsKes)}
+          </p>
+          <div className="flex items-center justify-between text-[11px] text-[#696B65]">
+            <span>Till {photographer.mpesaTillOrPaybill}</span>
+            <span className="text-[#D97706] font-mono font-semibold">Disburse</span>
+          </div>
+        </div>
+
+        {/* Catalog Retention */}
         <div className="bg-white border border-[#DCD8CE] rounded-xl p-5 space-y-2 shadow-sm">
           <div className="flex items-center justify-between text-xs text-[#696B65]">
-            <span>Catalog & Media Retention</span>
-            <Clock className="w-4 h-4 text-[#B66D4D]" />
+            <span>Media Retention</span>
+            <Clock className="w-4 h-4 text-[#696B65]" />
           </div>
           <p
             style={{ fontFamily: 'Inter' }}
@@ -244,7 +295,7 @@ export const PhotographerDashboard: React.FC = () => {
             style={{ fontFamily: 'Inter' }}
             className="text-[11px] text-[#696B65] font-mono"
           >
-            {myEvents.length} active events (90-day archive policy)
+            {myEvents.length} events (90-day archive policy)
           </p>
         </div>
 
@@ -253,6 +304,30 @@ export const PhotographerDashboard: React.FC = () => {
       {/* Segmented Navigation Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#DCD8CE] pb-3">
         <div className="flex items-center gap-1.5 p-1 bg-white rounded-xl border border-[#DCD8CE] text-xs flex-wrap shadow-sm">
+          {/* M-Pesa Revenue & Payouts Tab */}
+          <button
+            onClick={() => setActiveTab('mpesa_analytics')}
+            className={`px-4 py-2 font-medium rounded-lg transition-colors flex items-center gap-2 ${
+              activeTab === 'mpesa_analytics'
+                ? 'bg-[#35594B] text-white shadow-sm'
+                : 'text-[#696B65] hover:text-[#252723]'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>M-Pesa Revenue & Payouts</span>
+            {pendingPayoutsKes > 0 && (
+              <span
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+                  activeTab === 'mpesa_analytics'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-[#D97706]/15 text-[#D97706] border border-[#D97706]/30'
+                }`}
+              >
+                {formatKES(pendingPayoutsKes)}
+              </span>
+            )}
+          </button>
+
           <button
             onClick={() => setActiveTab('events')}
             className={`px-4 py-2 font-medium rounded-lg transition-colors ${
@@ -272,7 +347,7 @@ export const PhotographerDashboard: React.FC = () => {
                 : 'text-[#696B65] hover:text-[#252723]'
             }`}
           >
-            Sales & Orders ({myOrders.length})
+            Itemized Orders ({myOrders.length})
           </button>
 
           <button
@@ -313,6 +388,14 @@ export const PhotographerDashboard: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* TAB 0: M-Pesa Analytics & Payouts Dashboard */}
+      {activeTab === 'mpesa_analytics' && (
+        <MpesaTransactionDashboard
+          photographer={photographer}
+          orders={myOrders}
+        />
+      )}
 
       {/* TAB 1: Events Manager */}
       {activeTab === 'events' && (
@@ -603,8 +686,15 @@ export const PhotographerDashboard: React.FC = () => {
                 key={photo.id}
                 className="bg-[#FAF8F5] border border-[#DCD8CE] rounded-lg p-2 space-y-2 group"
               >
-                <div className="aspect-square bg-white rounded overflow-hidden relative border border-[#DCD8CE]">
-                  <img src={photo.thumbnailUrl} alt={photo.code} className="w-full h-full object-cover" />
+                <div className="aspect-square bg-white rounded overflow-hidden relative border border-[#DCD8CE] flex items-center justify-center">
+                  {photo.thumbnailUrl && photo.thumbnailUrl.trim() !== '' ? (
+                    <img src={photo.thumbnailUrl.trim()} alt={photo.code} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-[#FAF8F5] text-[#696B65]">
+                      <Camera className="w-5 h-5 text-[#35594B] mb-1" />
+                      <span className="text-[10px] font-mono">{photo.code}</span>
+                    </div>
+                  )}
                   {events.find((e) => e.id === photo.eventId)?.coverImageUrl === (photo.previewWatermarkedUrl || photo.originalUrl) && (
                     <div className="absolute top-1 left-1 bg-[#35594B] text-white text-[9px] font-mono px-1.5 py-0.5 rounded shadow">
                       Cover

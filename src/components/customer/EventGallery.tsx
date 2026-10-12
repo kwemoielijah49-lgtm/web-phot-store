@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { PhotoCard } from './PhotoCard';
+import { EventShareBar } from './EventShareBar';
+import { EventSocialShareModal } from './EventSocialShareModal';
 import { Photo } from '../../types';
 import { formatKES } from '../../utils/mpesa';
 import {
@@ -15,6 +17,7 @@ import {
   Download,
   CheckCircle2,
   ShieldCheck,
+  Share2,
 } from 'lucide-react';
 
 interface EventGalleryProps {
@@ -48,6 +51,7 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'code_asc' | 'code_desc' | 'time'>('code_asc');
   const [filterPurchasedOnly, setFilterPurchasedOnly] = useState<boolean>(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
 
   // Purchased photos by this customer for this event
   const purchasedItems = useMemo(() => {
@@ -157,20 +161,31 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
           <span>Back to All Events</span>
         </button>
 
-        {purchasedItems.length > 0 && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() =>
-              openDownloadAllModal({
-                customItems: purchasedItems,
-                eventTitle: event.title,
-              })
-            }
-            className="sm:hidden px-3.5 py-1.5 bg-[#35594B] text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm"
+            type="button"
+            onClick={() => setIsShareModalOpen(true)}
+            className="px-3.5 py-1.5 bg-white hover:bg-[#FAF8F5] text-[#35594B] border border-[#DCD8CE] hover:border-[#35594B] rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>Download All ({purchasedItems.length})</span>
+            <Share2 className="w-3.5 h-3.5 text-[#35594B]" />
+            <span>Share Gallery</span>
           </button>
-        )}
+
+          {purchasedItems.length > 0 && (
+            <button
+              onClick={() =>
+                openDownloadAllModal({
+                  customItems: purchasedItems,
+                  eventTitle: event.title,
+                })
+              }
+              className="sm:hidden px-3.5 py-1.5 bg-[#35594B] text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download All ({purchasedItems.length})</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Customer Delivery Banner for Purchased Event Photos */}
@@ -269,6 +284,17 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
               <Clock className="w-3.5 h-3.5 text-[#35594B]" />
               <span>Retention policy: {daysRemaining} days active</span>
             </div>
+
+            <div className="border-t border-[#DCD8CE] pt-2">
+              <button
+                type="button"
+                onClick={() => setIsShareModalOpen(true)}
+                className="w-full py-2 bg-white hover:bg-[#F4F0E7] text-[#35594B] border border-[#DCD8CE] hover:border-[#35594B] rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs"
+              >
+                <Share2 className="w-3.5 h-3.5 text-[#35594B]" />
+                <span>Share WhatsApp & Instagram</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -288,6 +314,13 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
           </div>
         )}
       </section>
+
+      {/* Social Media Sharing Bar (WhatsApp, Instagram, Link Sticker & Story Flyer) */}
+      <EventShareBar
+        event={event}
+        photographer={photographer}
+        onOpenFullModal={() => setIsShareModalOpen(true)}
+      />
 
       {/* Filter & Search Bar */}
       <section className="bg-white border border-[#DCD8CE] rounded-xl p-4 sm:p-5 space-y-4 shadow-sm">
@@ -497,6 +530,14 @@ export const EventGallery: React.FC<EventGalleryProps> = ({
           </button>
         </aside>
       )}
+
+      {/* Event Social Share Modal */}
+      <EventSocialShareModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        event={event}
+        photographer={photographer}
+      />
 
     </div>
   );

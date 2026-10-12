@@ -298,10 +298,10 @@ export const EventEditorModal: React.FC<EventEditorModalProps> = ({ initialEvent
               </div>
 
               {/* Live Preview Window */}
-              {coverImageUrl && (
+              {Boolean(coverImageUrl && coverImageUrl.trim() !== '') && (
                 <div className="relative aspect-[16/8] rounded-lg overflow-hidden border border-[#DCD8CE] bg-neutral-100 shadow-inner">
                   <img
-                    src={coverImageUrl}
+                    src={coverImageUrl.trim()}
                     alt="Cover preview"
                     className="w-full h-full object-cover"
                     style={{ imageRendering: '-webkit-optimize-contrast' }}

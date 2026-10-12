@@ -30,7 +30,9 @@ export const EventCard: React.FC<EventCardProps> = ({
   const daysLeft = Math.max(0, Math.ceil((retentionDate - Date.now()) / (1000 * 3600 * 24)));
 
   const basePrice = event.overridePriceKes || event.suggestedPriceKes;
-  const coverUrl = event.coverImageUrl || coverImageFallback;
+  const coverUrl = (event.coverImageUrl && event.coverImageUrl.trim() !== '')
+    ? event.coverImageUrl.trim()
+    : (coverImageFallback && coverImageFallback.trim() !== '' ? coverImageFallback.trim() : null);
 
   return (
     <article

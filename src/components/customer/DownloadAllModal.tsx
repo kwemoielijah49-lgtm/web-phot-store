@@ -12,6 +12,7 @@ import {
   Sparkles,
   AlertCircle,
   Loader2,
+  Camera,
 } from 'lucide-react';
 import {
   DownloadItem,
@@ -88,14 +89,12 @@ export const DownloadAllModal: React.FC<DownloadAllModalProps> = ({
 
       for (const entry of itemsToDownload) {
         const verification = verifyAndDownloadOriginal(entry.orderId, entry.item.photoId);
-        const resolvedUrl =
-          verification.allowed && verification.originalUrl
-            ? verification.originalUrl
-            : entry.photoObj?.originalUrl || entry.item.thumbnailUrl;
-
-        if (!resolvedUrl) {
-          throw new Error(`Media file for ${entry.item.photoCode} could not be resolved.`);
+        if (!verification.allowed || !verification.originalUrl) {
+          throw new Error(
+            `Download authorization failed for ${entry.item.photoCode}: ${verification.error || 'Payment unverified.'}`
+          );
         }
+        const resolvedUrl = verification.originalUrl;
 
         resolvedList.push({
           url: resolvedUrl,
@@ -189,22 +188,34 @@ export const DownloadAllModal: React.FC<DownloadAllModalProps> = ({
 
             {/* Photo Thumbnails Preview Row */}
             <div className="flex items-center gap-2 overflow-x-auto py-1 pt-2 border-t border-[#DCD8CE]">
-              {itemsToDownload.map((it, idx) => (
-                <div
-                  key={idx}
-                  className="relative w-12 h-12 rounded-md overflow-hidden bg-white border border-[#DCD8CE] shrink-0 group"
-                  title={`${it.item.photoCode} - ${it.item.photoTitle}`}
-                >
-                  <img
-                    src={it.item.thumbnailUrl || it.photoObj?.thumbnailUrl || it.photoObj?.originalUrl}
-                    alt={it.item.photoCode}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-x-0 bottom-0 bg-black/70 text-[8px] font-mono text-white text-center py-0.5 truncate px-0.5">
-                    {it.item.photoCode}
+              {itemsToDownload.map((it, idx) => {
+                const itemThumb = (it.item.thumbnailUrl && it.item.thumbnailUrl.trim() !== '')
+                  ? it.item.thumbnailUrl.trim()
+                  : (it.photoObj?.thumbnailUrl?.trim() || it.photoObj?.previewWatermarkedUrl?.trim() || it.photoObj?.originalUrl?.trim() || null);
+
+                return (
+                  <div
+                    key={idx}
+                    className="relative w-12 h-12 rounded-md overflow-hidden bg-white border border-[#DCD8CE] shrink-0 group"
+                    title={`${it.item.photoCode} - ${it.item.photoTitle}`}
+                  >
+                    {itemThumb ? (
+                      <img
+                        src={itemThumb}
+                        alt={it.item.photoCode}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-[#FAF8F5] text-[#35594B]">
+                        <Camera className="w-4 h-4" />
+                      </div>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 bg-black/70 text-[8px] font-mono text-white text-center py-0.5 truncate px-0.5">
+                      {it.item.photoCode}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="flex items-center justify-between text-[11px] text-[#696B65] pt-1">

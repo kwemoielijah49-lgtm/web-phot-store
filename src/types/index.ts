@@ -69,6 +69,17 @@ export interface Photo {
   cameraModel?: string;
 }
 
+export interface SellerSplit {
+  photographerId: string;
+  photographerBusinessName: string;
+  itemCount: number;
+  grossAmountKes: number;
+  commissionKes: number;
+  processingFeeKes: number;
+  netEarningsKes: number;
+  payoutStatus: 'pending' | 'settled' | 'paid';
+}
+
 export interface OrderItem {
   photoId: string;
   photoCode: string;
@@ -77,6 +88,8 @@ export interface OrderItem {
   priceKes: number;
   eventId: string;
   eventTitle: string;
+  photographerId?: string;
+  photographerBusinessName?: string;
 }
 
 export interface Order {
@@ -96,20 +109,33 @@ export interface Order {
   platformCommissionRate: number; // e.g. 0.10
   commissionAmountKes: number;
   photographerEarningsKes: number;
-  status: 'pending' | 'paid' | 'failed' | 'refunded';
+  estimatedProcessingFeeKes?: number;
+  actualProcessingFeeKes?: number;
+  sellerSplits?: SellerSplit[];
+  status: 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded' | 'quarantined';
   createdAt: string;
   paidAt?: string;
   mpesaReference?: string;
-  downloadToken: string;
-  downloadExpiresAt: string; // ISO date (30 days from purchase)
+  merchantRequestId?: string;
+  checkoutRequestId?: string;
+  downloadToken?: string;
+  downloadExpiresAt?: string; // ISO date (30 days from purchase)
+  failureReason?: string;
+  idempotencyKey?: string;
+  payoutStatus?: 'pending' | 'settled' | 'processing';
+  payoutReference?: string;
+  payoutSettledAt?: string;
 }
 
 export interface PaymentAttempt {
   id: string;
   orderId: string;
+  orderNumber?: string;
   mpesaPhone: string;
   amountKes: number;
   internalRef: string;
+  merchantRequestId?: string;
+  checkoutRequestId?: string;
   mpesaReceipt?: string;
   status: 'initiated' | 'stk_sent' | 'completed' | 'failed' | 'cancelled';
   errorMessage?: string;

@@ -1,13 +1,14 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { formatKES } from '../../utils/mpesa';
-import { X, Trash2, ShoppingBag, ArrowRight, Sparkles, ShieldCheck } from 'lucide-react';
+import { X, Trash2, ShoppingBag, ArrowRight, Sparkles, ShieldCheck, Camera } from 'lucide-react';
 
 export const CartDrawer: React.FC = () => {
   const {
     isCartOpen,
     setIsCartOpen,
     cart,
+    photos,
     removeFromCart,
     clearCart,
     getCartTotals,
@@ -66,26 +67,38 @@ export const CartDrawer: React.FC = () => {
                 </div>
 
                 <div className="space-y-3">
-                  {cart.map((item) => (
-                    <div
-                      key={item.photoId}
-                      className="p-3 bg-[#FAF8F5] border border-[#DCD8CE] rounded-lg flex items-center justify-between gap-3"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <img
-                          src={item.thumbnailUrl}
-                          alt={item.photoCode}
-                          className="w-12 h-9 object-cover rounded bg-neutral-200 shrink-0"
-                        />
-                        <div className="min-w-0">
-                          <p className="font-mono text-xs font-semibold text-[#252723] truncate">
-                            {item.photoCode}
-                          </p>
-                          <p className="text-[11px] text-[#696B65] truncate">
-                            {item.eventTitle}
-                          </p>
+                  {cart.map((item) => {
+                    const matchedPhoto = photos.find((p) => p.id === item.photoId);
+                    const itemThumbnail = (item.thumbnailUrl && item.thumbnailUrl.trim() !== '')
+                      ? item.thumbnailUrl.trim()
+                      : (matchedPhoto?.thumbnailUrl?.trim() || matchedPhoto?.previewWatermarkedUrl?.trim() || matchedPhoto?.originalUrl?.trim() || null);
+
+                    return (
+                      <div
+                        key={item.photoId}
+                        className="p-3 bg-[#FAF8F5] border border-[#DCD8CE] rounded-lg flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          {itemThumbnail ? (
+                            <img
+                              src={itemThumbnail}
+                              alt={item.photoCode}
+                              className="w-12 h-9 object-cover rounded bg-neutral-200 shrink-0"
+                            />
+                          ) : (
+                            <div className="w-12 h-9 rounded bg-[#EFE9DC] text-[#35594B] flex items-center justify-center shrink-0">
+                              <Camera className="w-4 h-4" />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="font-mono text-xs font-semibold text-[#252723] truncate">
+                              {item.photoCode}
+                            </p>
+                            <p className="text-[11px] text-[#696B65] truncate">
+                              {item.eventTitle}
+                            </p>
+                          </div>
                         </div>
-                      </div>
 
                       <div className="flex items-center gap-3 shrink-0">
                         <span className="font-mono text-xs font-semibold text-[#252723] tabular-nums">
@@ -100,8 +113,9 @@ export const CartDrawer: React.FC = () => {
                         </button>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
+              </div>
 
                 {/* Bundle Savings Indicator */}
                 {totals.discountKes > 0 && (

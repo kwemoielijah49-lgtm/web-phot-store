@@ -109,8 +109,8 @@ export const Navbar: React.FC = () => {
                 onClick={() => setShowAccountMenu(!showAccountMenu)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-[#DCD8CE] hover:border-[#35594B] transition-colors text-xs text-[#252723]"
               >
-                {firebaseUser.photoURL ? (
-                  <img src={firebaseUser.photoURL} alt="Avatar" className="w-5 h-5 rounded-full" />
+                {firebaseUser.photoURL && firebaseUser.photoURL.trim() !== '' ? (
+                  <img src={firebaseUser.photoURL.trim()} alt="Avatar" className="w-5 h-5 rounded-full" />
                 ) : (
                   <div className="w-5 h-5 rounded-full bg-[#35594B]/10 text-[#35594B] flex items-center justify-center font-bold text-[10px]">
                     {firebaseUser.displayName?.charAt(0) || 'U'}

@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   HelpCircle,
   Smartphone,
+  Camera,
 } from 'lucide-react';
 
 interface OrderLookupViewProps {
@@ -22,6 +23,7 @@ interface OrderLookupViewProps {
 export const OrderLookupView: React.FC<OrderLookupViewProps> = ({ onOpenRefundModal }) => {
   const {
     orders,
+    photos,
     lookupOrdersByPhoneOrCode,
     verifyAndDownloadOriginal,
     latestPaidOrder,
@@ -200,7 +202,9 @@ export const OrderLookupView: React.FC<OrderLookupViewProps> = ({ onOpenRefundMo
         {displayedOrders.length > 0 ? (
           <div className="space-y-5">
             {displayedOrders.map((order) => {
-              const expiryDate = new Date(order.downloadExpiresAt);
+              const expiryDate = order.downloadExpiresAt
+                ? new Date(order.downloadExpiresAt)
+                : new Date(Date.now() + 30 * 24 * 3600 * 1000);
               const isExpired = Date.now() > expiryDate.getTime();
               const daysLeft = Math.max(0, Math.ceil((expiryDate.getTime() - Date.now()) / (1000 * 3600 * 24)));
 
@@ -272,24 +276,37 @@ export const OrderLookupView: React.FC<OrderLookupViewProps> = ({ onOpenRefundMo
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                      {order.items.map((item) => (
-                        <div
-                          key={item.photoId}
-                          className="group relative bg-[#FAF8F5] border border-[#DCD8CE] rounded-lg overflow-hidden flex flex-col justify-between"
-                        >
-                          <div className="aspect-[4/3] bg-[#FAF8F5] relative overflow-hidden flex items-center justify-center">
-                            <img
-                              src={item.thumbnailUrl}
-                              alt={item.photoCode}
-                              className="w-full h-full object-cover"
-                            />
-                            {/* Watermark notice */}
-                            <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                              <span className="text-[10px] text-white font-mono bg-[#252723]/90 px-2 py-0.5 rounded">
-                                Unwatermarked Master
-                              </span>
+                      {order.items.map((item) => {
+                        const matchedPhoto = photos.find((p) => p.id === item.photoId);
+                        const thumbSrc = (item.thumbnailUrl && item.thumbnailUrl.trim() !== '')
+                          ? item.thumbnailUrl.trim()
+                          : (matchedPhoto?.thumbnailUrl?.trim() || matchedPhoto?.previewWatermarkedUrl?.trim() || matchedPhoto?.originalUrl?.trim() || null);
+
+                        return (
+                          <div
+                            key={item.photoId}
+                            className="group relative bg-[#FAF8F5] border border-[#DCD8CE] rounded-lg overflow-hidden flex flex-col justify-between"
+                          >
+                            <div className="aspect-[4/3] bg-[#FAF8F5] relative overflow-hidden flex items-center justify-center">
+                              {thumbSrc ? (
+                                <img
+                                  src={thumbSrc}
+                                  alt={item.photoCode}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center text-[#696B65] p-2 text-center bg-[#FAF8F5]">
+                                  <Camera className="w-5 h-5 text-[#35594B] mb-1" />
+                                  <span className="text-[10px] font-mono">{item.photoCode}</span>
+                                </div>
+                              )}
+                              {/* Watermark notice */}
+                              <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span className="text-[10px] text-white font-mono bg-[#252723]/90 px-2 py-0.5 rounded">
+                                  Unwatermarked Master
+                                </span>
+                              </div>
                             </div>
-                          </div>
 
                           <div className="p-2 bg-white flex items-center justify-between gap-1 text-[11px]">
                             <span className="font-mono font-medium text-[#252723] truncate">{item.photoCode}</span>
@@ -307,9 +324,10 @@ export const OrderLookupView: React.FC<OrderLookupViewProps> = ({ onOpenRefundMo
                             )}
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
+                </div>
 
                   {/* Expiry Banner & Refund Trigger */}
                   <div className="pt-3 border-t border-[#DCD8CE] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[#696B65]">
